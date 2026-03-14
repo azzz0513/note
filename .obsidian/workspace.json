@@ -4,11 +4,11 @@
     "type": "split",
     "children": [
       {
-        "id": "3a7ed0cea50639bc",
+        "id": "d2e56ff77332010b",
         "type": "tabs",
         "children": [
           {
-            "id": "54fa1c866172943c",
+            "id": "11dd2ba1a42ad17e",
             "type": "leaf",
             "state": {
               "type": "empty",
@@ -175,8 +175,9 @@
       "obsidian-git:Open Git source control": false
     }
   },
-  "active": "54fa1c866172943c",
+  "active": "11dd2ba1a42ad17e",
   "lastOpenFiles": [
+    "新建 文本文档.txt",
     "note",
     "软件体系结构/Chapter 1.md",
     "note/Golang/images/Pasted image 20250806145120.png",
@@ -221,7 +222,6 @@
     "note/MySQL",
     "note/MongoDB",
     "note/grpc/images",
-    "note/grpc",
-    "note/go-zero/images"
+    "note/grpc"
   ]
 }
