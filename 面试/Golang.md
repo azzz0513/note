@@ -1,0 +1,2466 @@
+## 为什么选择Go而不是其他语言
+我选择 Go 主要是因为它在**开发效率**（像 Python）和**运行性能**（接近 C/C++）之间找到了一个极好的平衡点。特别是在高并发、微服务和云原生的背景下，Go 展现出了独特的优势。
+首先Go是原生支持高并发的，相较于Java的操作系统级线程，Go的goroutine极其轻量，配合GMP调度模型，单机可以轻松承载数万或者数百万的并发。
+在性能和资源占用的方面，Python是解释型语言，速度较慢；Java需要启动JVM，内存占用较高，而Go是静态编译型语言，直接编译为机器码，执行速度非常快，同时内存的占用也非常低
+对于工程化和运维方面，Go的部署非常简单，
+维护性，Go相较于C++语法比较简单，极少的关键字，强制统一的代码格式，都让代码的可读性极
+高。这是非常有利于团队的协作和接手老项目的。
+
+## Go为什么适用云原生
+首先最直接的原因就是。云原生技术栈的核心项目，几乎都是Go写的：
+- Docker
+- K8s
+- Prometheus
+- Etcd、Consul等
+在云原生环境中，容器是交付的标准单位，Go在这方面具有天然优势：
+- 静态链接：
+	- Java、Python、Node：需要安装JVM、Python解释器、Node运行时，还需要配置复杂的依赖包
+	- Go：编译后生成一个单一的、独立的二进制文件。它不依赖系统库，随拷随用
+- 镜像极小：
+	- Java镜像因为要塞进一个JVM，往往需要几百MB
+	- 镜像小意味着拉取快、启动快、网络带宽占用低，这对于集群扩缩容至关重要
+
+高并发与网络性能：
+微服务架构的本质就是大量的网络通信（RPC、RESTful调用）。服务主要是在等待I/O（读/写数据库、调其他服务）
+- Goroutine（协程）：
+	- Go的并发模型基于CSP
+	- 启动一个Goroutine只需要2KB，而Java线程需要1MB
+	- 可以在一台机器上跑上百万个goroutine，而不会把内存撑爆
+- 这使得Go非常适合编写高吞吐量的网络网关、代理服务器等中间件
+
+启动速度与资源占用：
+云原生强调弹性伸缩
+- 冷启动：
+	- Java：启动可能需要几秒甚至几十秒（JVM预热、类加载）
+	- Go：通常在毫秒级启动
+- 在 Serverless（如 AWS Lambda）或 K8s 自动扩容场景下，Go 能瞬间响应突发流量，而不用像 Java 那样预留大量资源等待预热。
+- 占用内存少，意味着同样的服务器硬件，能跑更多的微服务实例，直接降低了云厂商的账单。
+
+## Go是一个静态链接的语言
+#### 静态链接
+**做法**：你在出发前，把家里的大瓶洗发水、沐浴露、牙膏全部灌进你的**行李箱**里。
+- **特点**：
+    - 你的行李箱（可执行文件）会变得**很大、很重**。
+    - 到了荒岛（目标机器），不管那里有没有便利店，你都能直接洗澡，**完全不依赖外部环境**。
+    - 如果洗发水配方升级了，你必须重新收拾行李箱（重新编译程序）。
+**在计算机中**：  
+编译时，编译器把你写的代码和你用到的所有库（Library）的代码，**全都复制粘贴**到最终的 .exe (或 Linux 的可执行文件) 里。
+- **代表语言**：**Go** (默认情况), Rust (默认情况)。
+
+### 动态链接
+**做法**：你只带一张**清单**（引用），清单上写着：“到了目的地，去当地便利店买飘柔洗发水”。
+- **特点**：
+    - 你的行李箱（可执行文件）**非常轻、很小**。
+    - 到了荒岛，如果岛上有一家便利店（操作系统）且刚好卖飘柔（安装了对应的动态库），你就可以用。
+    - **风险**：如果岛上没有便利店，或者便利店倒闭了，或者只卖海飞丝不卖飘柔，你就洗不了澡了（程序报错无法运行）。
+    - **优势**：如果便利店把飘柔升级成了新款，你不需要换行李，直接去买新的就能用到最新款（库升级了，程序不用重新编译）。
+**在计算机中**：  
+编译时，不把库的代码复制进去，只是在 .exe 里留个标记：“运行时请去系统里找 libc.so 或 kernel32.dll 借用一下 printf 函数”。
+- **代表语言**：C/C++ (通常默认), Python (依赖解释器和系统库)。
+
+
+### 为什么生成的执行文件也不大
+#### 死代码消除
+这是最核心的原因。Go 的链接器非常聪明，它不会“无脑”把所有库的代码都塞进去。
+
+**比喻：**  
+假设你要去旅行（编译），你引用了一个巨大的工具箱（标准库 fmt）。
+- **笨链接器**：把整个工具箱（锤子、锯子、电钻、螺丝刀……）几百样工具全部塞进你包里，不管你用不用。
+- **Go 链接器**：它会分析你的代码，发现你只写了一句 fmt.Println。于是，它**只把“打印”相关的代码**拿出来塞进包里，至于“扫描”、“格式化错误”、“文件读取”等工具，它发现你没用，就**直接扔掉**，不打包进最终文件。
+
+**技术术语**：这也叫 **Tree Shaking**（摇树优化）。把树（程序）摇一摇，没挂住的枯叶（没用到的函数/变量）就掉下来了，不带走。
+
+#### 紧凑的Runtime
+Go 程序里包含了一个“运行时”（Runtime），负责垃圾回收（GC）、协程调度（Goroutine Scheduler）等。  
+听起来很重，但实际上 Go 的 Runtime 写得非常**精简**。
+
+- **对比 Java**：Java 需要一个巨大的 JVM 虚拟机才能运行。这个 JVM 本身就好几百兆（虽然它预装在系统里，但逻辑上它是运行庞然大物）。
+- **Go 的策略**：Go 把这个 Runtime 做到了最小化，基础开销大概只有 **2MB** 左右。
+    - 也就是说，一个什么都不干的 Hello World，Go 编译出来大概是 2MB。
+    - 这 2MB 就是它的“入场费”，包含了让程序能跑起来的所有基础服务。之后每增加业务代码，体积只是线性微增。
+
+#### 直接系统调用
+在 Linux 下，普通的 C 程序调用系统功能（比如打开文件）通常要经过 glibc 这个庞大的库。  
+而纯 Go 程序（禁用 CGO 时）**绕过了 glibc**，直接向操作系统内核发起系统调用（Syscall）。
+
+这意味着 Go 不需要把庞大的 C 语言标准库的一堆兼容性代码打包进去，它走的是“直连通道”，省去了一层中间商赚差价（体积）。
+
+#### 如果还是觉得Go文件有点大
+你可能会发现，自己写了几行代码，编译出来竟然有 10MB+，这时候通常是因为**包含了“调试信息”**。
+
+默认情况下（直接 go build），编译器会把**符号表（Symbol Table）**和**调试信息（DWARF）**塞进可执行文件。这些是为了让你在程序崩溃时能看到是哪一行代码报错，或者方便 GDB 调试。这些信息往往占了文件体积的 **30% - 50%**。
+
+**瘦身秘籍（生产环境必用）：**  
+如果你确定不需要调试信息，可以用我之前提到的参数来裁剪：
+```Bash
+# -s: 去掉符号表
+# -w: 去掉 DWARF 调试信息
+go build -ldflags "-s -w" -o myapp main.go
+```
+
+**效果对比：**
+- 普通编译：15 MB
+- 瘦身编译：8 MB (直接减半！)
+
+## 基础
+### Go与其他语言相比有什么好处
+- Go针对并发进行了优化，支持协程Goroutine，并实现了高效的GMP调度模型
+- Go具有单一的标准代码格式，更具可读性
+- 更高效的垃圾回收机制，支持并行垃圾回收，垃圾回收效率高
+
+### ==进程、线程、协程区别==
+- 进程：进程是具有一定独立功能的程序，进程是系统资源分配和调度的最小单位。每个进程都有自己的独立内存空间，不同进程通过进程间通信来通信。由于进程比较重量，占据独立的内存，所以上下文进程间的切换开销（栈、寄存器、虚拟内存、文件句柄等）较大，但相对比较稳定安全
+- 线程：线程是进程的一个实体，线程是内核态的，而且是CPU调度和分派的基本单位，它是比进程更小的能独立运行的基本单位。线程间通信主要通过共享内存，上下文切换很快，资源开销较少，但相比进程不够稳定，容易丢失数据
+- 协程：协程是一种用户态的轻量级线程，协程的调度完全是由用户来控制的。协程拥有自己的寄存器上下文和栈。协程调度切换时，将寄存器上下文和栈保存到其他地方，在切回来的时候，恢复先前保存的寄存器上下文和栈，直接操作栈则基本没有内核切换的开销，可以不加锁的访问全局变量，所以上下文的切换非常快
+
+### ==make和new的区别==
+在Golang中，`make`和`new`都是用于内存分配的内建函数，但它们的使用场景和功能有所不同：
+- `make`：
+	- 用于初始化并分配内存，只能用于创建`slice`、`map`、`channel`三种类型
+	- 返回的是初始化后的数据结构，而不是指针
+- `new`：
+	- 用于分配内存，但不初始化，返回的是指向该内存的指针
+	- 可用于任何类型的内存分配
+
+### ==数组和切片的区别==
+- 数组：数组固定长度。数组长度是数组类型的一部分，数组需要指定大小，不指定也会根据初始化，自动推算出大小，数组大小不可改变。数组是通过值传递的。
+- 切片：切片可以改变长度。切片是轻量级的数据结构，三个属性：指针（指向底层数组）、长度、容量，不需要指定大小，切片是引用类型，可以通过数组来初始化，也可通过`make`来初始化，初始化的时候len=cap，然后进行扩容。==slice的底层数据也是数组==，slice是对数组的封装，它描述一个数组的片段。
+
+### 使用for range时，它的地址会发生变化吗
+在Go1.23后，使用`for range`遍历一个集合的时候，迭代变量的地址会发生变化。这是因为`for range`每次迭代都会重新生成迭代变量，这些变量在内存中是不同的地址。
+
+### ==`for a := range b`，a映射的是值还是地址==
+`for a := range b`，a拿到的永远是值的拷贝，绝不是原始数据的地址
+
+### 高效拼接字符串
+- `+`：使用`+`操作符进行拼接，会对字符串进行遍历，计算并开辟一个新的空间来存储原来的两个字符串
+- `fmt.Sprintf`：由于采用了接口参数，必须要用反射获取值，因此会有性能损失
+- `strings.Builder`：用`WriteString`进行拼接，内部实现是指针+切片，同时`String`返回拼接后的字符串，它是直接把`[]byte`转换为`string`，从而避免变量拷贝
+- `bytes.Buffer`：`bytes.Buffer`是一个一个缓冲`byte`类型的缓冲器，这个缓冲器里存放着都是`byte`
+- `strings.join`：`stirngs.join`也是基于`strings.builder`来实现的，并且可以自定义分隔符，在join方法内调用了`b.Grow(n)`方法，这个是进行初步的容量分配，而前面计算的n的长度就是我们要拼接的slice的长度，因为我们传入切片长度固定，所以提前进行容量分配可以减少内存分配
+性能比较：`strings.join`=`strings.builder`>`bytes.Buffer`>`+`>`fmt.Sprintf`
+
+### ==defer的执行顺序？defer的作用或使用场景是什么？==
+defer的执行顺序和调用顺序相反，类似于栈（LIFO）
+
+defer的作用：当defer语句被执行时，跟在defer后面的函数会被延迟执行。直到包含该defer语句的函数执行完时，defer后面的函数才会被执行，不论包含defer语句的函数是通过return正常结束还是由于panic导致的异常结束。我们可以在一个函数中执行多条defer语句，它们的执行顺序与声明顺序相反
+
+defer的常用场景：
+- defer语句经常被用于处理成对的操作，如打开、关闭、连接、断开连接、加锁、释放锁
+- 通过defer机制，不论函数逻辑多复杂，都能保证在任何执行路径下，资源被释放
+- 释放资源的defer应该直接跟在请求资源的语句后
+
+### defer的参数是值拷贝
+当代码执行到 defer 这一行时，Go 运行时会把括号里的参数算出来，拷贝一份存好。无论后面这个变量怎么变，defer 里的那个值已经定死了。
+```Go
+package main
+
+import "fmt"
+
+func main() {
+    a := 10
+    // 此时 a=10。defer 会把 10 这个值拷贝进去。
+    // 意思是：请在函数结束时，打印 10。
+    defer fmt.Println("defer里的 a:", a)
+
+    a = 20
+    fmt.Println("main里的 a:", a)
+}
+```
+输出结果：
+```Text
+main里的 a: 20
+defer里的 a: 10  <-- 也就是声明时的值，不是结束时的值
+```
+
+使用闭包和显式传参：
+闭包（不传参，直接引用外部变量）：
+```Go
+func main() {
+    a := 10
+    // 这是一个闭包，它引用了外部的 a
+    // 此时并没有拷贝 a 的值，只是记录了"我要用外部的 a"
+    defer func() {
+        fmt.Println("闭包里的 a:", a)
+    }()
+
+    a = 20
+}
+```
+输出：20
+原因：因为闭包是“引用捕获”。当 main 函数结束，defer 执行时，它去外部找 a，此时 a 已经变成 20 了。
+
+显式传参：
+```Go
+func main() {
+    a := 10
+    // 显式把 a 当作参数传进去
+    // 在这行代码执行时，a(10) 被拷贝给了函数的参数 x
+    defer func(x int) {
+        fmt.Println("传参里的 x:", x)
+    }(a)
+
+    a = 20
+}
+```
+输出：10
+原因：符合“参数即时求值”的规则，10 被拷贝进去了。
+
+### 什么是rune类型
+Go中的字符有以下两种类型：
+- uint8类型，也叫byte类型，代表了ASCII码的一个字符
+- rune类型，代表一个UTF-8类型，当需要处理中文、日文或者其他复合字符时，则需要使用rune类型。rune类型等价于int32类型
+
+
+### tag有什么用
+tag可以为结构体成员提供属性，常见的有：
+1. json：序列化或反序列化时字段的名称
+2. db：sqlx模块中对应的数据库字段名
+3. form：gin框架中对应的前端的数据字段名
+4. binding：搭配form使用，默认如果没查找到结构体中的某个字段则不报错值为空，binding为required代表没找到返回错误给前端
+
+### 空struct{}占用空间吗
+可以使用 unsafe.Sizeof 计算出一个数据类型实例需要占用的字节数，空struct{}不占用任何空间
+```Go
+package main
+
+import (
+  "fmt"
+  "unsafe"
+)
+
+func main() {
+  fmt.Println(unsafe.Sizeof(struct{}{}))  //0
+}
+```
+
+
+### 空struct{}的作用
+- 用map模拟一个set，那么就要把值置为struct{}，struct{}本身不占用任何空间，可以避免任何多余的内存分配
+```Go
+type Set map[string]struct{}
+
+func main() {
+	set := make(Set)
+	
+	for _, item := range []stirng{"A", "A", "B", "C"} {
+		set[item] = struct{}{}
+	}
+	fmt.Println(len(set)) // 3
+	if _, ok := set["A"]; ok {
+		fmt.Println("A exists")
+	}
+}
+```
+- 有时候给通道发送一个空结构体，`channel<-struct{}`，可以节省空间
+```Go
+func main() {
+	ch := make(chan struct{}, 1)
+	go func() {
+		<-ch
+		// ...
+	}()
+	ch <- struct{}{}
+	// ...
+}
+```
+- 表示仅有方法的结构体
+```Go
+type Lamp strcut{}
+```
+
+### `init()`函数是什么时候执行的
+在`main`函数执行之前
+
+`init()`函数是go初始化的一部分，由runtime初始化每个导入的包，初始化不是按照从上到下的导入顺序，而是按照解析的依赖关系，没有依赖的包最先初始化。
+每个包首先初始化包作用域的常量和变量（常量优先于变量），然后执行包的`init()`函数。同一个包，甚至是同一个源文件可以由多个`init()`函数。`init()`函数没有入参和返回值，不能被其他函数调用，同一个包内多个`init()`函数执行顺序不做保证。
+
+执行顺序：import –> const –> var –>`init()`–>`main()`
+
+
+### 2个interface可以比较吗
+2个interface相等有以下2种情况：
+- 两个interface均等于nil（V与T都处于unset状态）
+- 类型T相同，且对应的值V相等
+
+### 2个nil可能不相等吗
+可能不相等。interface在运行时绑定值，只有值为nil接口值才为nil，但是与指针的nil不相等。
+```Go
+var p *int = nil
+var i interface{} = nil
+if(p == i) {
+	fmt.Println("Equal")
+}
+```
+两个nil只有在类型相同时才相等
+
+
+### ==函数传参是值类型还是引用类型==
+- 在Go语言中只存在值传递，要么是值的副本，要么是指针的副本。无论是值类型的变量还是引用类型的变量亦或是指针类型的变量作为参数传递都会发生值拷贝，开辟新的内存空间
+- 值传递、引用传递和值类型、引用类型是不同的概念。引用类型作为变量传递可以影响到函数外部是因为发生值拷贝后新旧变量指向了相同的内存地址
+
+### 如何知道一个对象是分配在栈上还是堆上
+Go局部变量会进行逃逸分析。如果变量离开作用域后没有被引用，则优先分配到栈上，否则分配到堆上。
+如何判断是否发生了逃逸：`go build -gcflags '-m -l' xxx.go`
+关于逃逸的可能情况：
+- 变量大小不稳定
+- 变量类型不确定
+- 变量分配的内存超过用户栈最大值，暴露给了外部指针
+
+### Go的多返回值是如何实现的
+Go语言的多返回值是通过在函数调用栈帧上预留空间并进行值复制来实现的。在函数调用发生时，Go编译器会计算出函数所有返回值的总大小。在为该函数创建栈帧时，就会在调用方（caller）的栈帧上，为这些返回值预留出连续的内存空间。
+当函数执行到`return`语句时，它会将其要返回的各个值复制到这些预留好的栈空间中。函数执行完毕后，控制权返回给调用方。此时，调用方可以直接从它自己的栈帧上（即之前为返回值预留的空间）获取这些返回的值。
+![[images/Pasted image 20251102220744.png]]
+
+### Go语言普通指针和unsafe.Pointer有什么区别
+普通指针比如`*int`、`*string`，它们有明确的类型信息，编译器会进行类型检查和垃圾回收跟踪。不同类型的指针之间不能直接转换，这是Go类型安全的体现。
+而`unsafe.Pointer`是Go的通用指针类型，可以理解为C语言中的`void*`，它绕过呢Go的类型系统，`unsafe.Pointer`可以与任意类型的指针相互转换，也可以和`uintptr`进行转换来做指针运算。
+另外，普通指针受GC管理和类型约束，`unsafe.Pointer`不受类型约束但仍受GC跟踪。
+
+### `unsafe.Pointer`与`uintptr`有什么区别和联系
+`unsafe.Pointer`和`uintptr`可以相互转换，这是Go提供的唯一合法的指针运算方式。典型用法是先将`unsafe.Pointer`转为`uintptr`做算术运算，然后再转回`unsafe.Pointer`使用。
+最关键的区别在于GC跟踪。`unsafe.Pointer`会被垃圾回收器跟踪，它指向的内存不会被错误回收；而`uintptr`只是一个普通整数，GC完全不知道它指向什么，如果没有其他引用，对应内存可能随时被回收。
+
+
+### 什么是零拷贝
+零拷贝是提升I/O性能的关键技术，特别是在网络编程和文件传输场景中
+
+简单来说，零拷贝并不是说数据完全没有被拷贝，而是指减少或消除CPU在用户态和内核态之间的数据拷贝，从而释放CPU资源去处理计算任务，同时利用DMA（直接内存访问）硬件来搬运数据
+
+传统I/O（read+write)
+```Go
+buf := make([]byte, 1024)
+file.Read(buf)  // 系统调用: read
+conn.Write(buf) // 系统调用: write
+```
+这个过程中发生了4次上下文切换和4次数据拷贝：
+- DMA拷贝：磁盘→内核读取缓冲区
+- CPU拷贝：内核读取缓冲区→用户缓冲区
+- CPU拷贝：用户缓冲区→内核socket缓冲区
+- DMA拷贝：内核socket缓冲区箭头网卡
+
+零拷贝：
+如Linux中的`sendfile`，将数据直接在内核空间传输：
+- DMA拷贝：磁盘→内核读取缓冲区
+- CPU拷贝（轻量）：只拷贝文件描述符和长度等元数据到Socket缓冲区（不拷贝数据本身）
+- DMA拷贝：硬件直接根据描述符，将数据从内核读取缓冲区→网卡
+
+Go语言实现零拷贝：
+核心在于`io.Copy`函数及其背后的`io.ReaderFrom`和`io.WriterTo`接口
+
+### ==Go的错误处理机制，与其他语言的区别？==
+Errors are values（错误即值）
+在Go中，错误不是一种中断程序运行的“异常事件”，而是一个普通的，作为函数返回值的数据
+#### Go 与其他语言的主要区别
+##### A. 控制流：显式 vs 隐式 (Explicit vs. Implicit)
+- **Go**: 错误处理逻辑写在发生错误的地方。代码是线性执行的，没有“魔法”般的跳转。这被称为 **Local Reasoning（局部推理）**——你看这一段代码，就知道它会怎么跑，不用担心不知道哪里抛出的异常跳过了这段逻辑。
+- **Java/Python**: 异常可能在任何地方抛出，控制流会跨越多个函数调用栈。这使得阅读代码时很难判断某个变量的状态是否被破坏。
+
+##### B. 视错误为数据 vs 视错误为事件
+- **Go**: error 是一个接口，只要实现了 Error() string 方法就是错误。你可以像传递整数或字符串一样传递错误，把它存进 Map，或者通过 Channel 发送。
+- **Java/Python**: 异常是一个特殊的类层级结构，需要特殊的关键字（throw, try, catch）来处理。
+
+##### C. 强制性 vs 约定性
+- **Rust**: 编译器强制你处理 Result，否则编译不通过（或者你必须显式调用 unwrap）。
+- **Go**: 这是一个弱点。Go 依靠惯例。你可以使用 _ 忽略错误（虽然不推荐），编译器不会强制你检查 err != nil。
+- **Java (Checked Exception)**: 强制捕获，但导致代码非常啰嗦，后来很多语言（C#, Python, Unchecked Java）都放弃了强制检查。
+
+### Panic和Recover
+Go 也有类似异常的机制，叫 **Panic（恐慌）** 和 **Recover（恢复）**，但它们的用途完全不同。
+- **其他语言**: 异常用于处理文件找不到、网络超时等**常规错误**。
+- **Go**: panic 仅用于**不可恢复的灾难性错误**（如数组越界、空指针引用、程序初始化失败）。
+    - **原则**: 不要在业务逻辑中使用 panic 来做控制流。
+    - recover 通常只在 Web 框架的中间件中使用，防止一个请求的 crash 导致整个服务器挂掉。
+
+### defer+recover
+recover必须且只能在defer修饰的函数内部直接调用才有效
+例：
+```Go
+func myFunc() {
+    // 1. 在函数头部声明 defer
+    defer func() {
+        // 2. 调用 recover 捕获 panic
+        if err := recover(); err != nil {
+            fmt.Println("捕获到了异常:", err)
+            // 这里可以做日志记录、资源释放等
+        }
+    }()
+
+    // ... 业务代码 ...
+    // 3. 可能会发生 panic 的代码
+    panic("boom!") 
+    
+    // 4. 注意：这行代码永远不会执行！
+    fmt.Println("这行不会被打印")
+}
+```
+当 recover 成功捕获 panic 后：
+1. **当前函数（发生 Panic 的函数）**：
+    - **立刻终止执行**。
+    - panic 点之后的代码（上面代码中的第4步）**完全被跳过**。
+    - 执行完 defer 函数中的逻辑后，该函数**正常返回**（就像执行了一个 return 一样）。
+2. **调用方（Caller，调用该函数的上层函数）**：
+    - **恢复正常执行**。
+    - 调用方会认为被调用的函数已经“执行完毕”并返回了。
+    - 代码会继续执行调用该函数之后的下一行代码。
+
+### 如何保持良好的代码规范和工程化思维
+Go 语言最大的特点之一是“强预设”。不要在 Code Review 中争论花括号换不换行，直接交给工具。
+#### 代码规范
+##### 1. 强制格式化 (Formatting)
+- **gofmt / goimports**: 这是必须的。没有经过 gofmt 的代码在 Go 社区是不被接受的。
+- **配置**: 在 IDE（VS Code / GoLand）中开启 "Run gofmt/goimports on save"。
+- **goimports**: 优于 gofmt，因为它能自动管理 import 包的排序和增删。
+##### 2. 静态代码分析 (Linting)
+- **golangci-lint**: 不要只用 go vet。golangci-lint 是目前业界标准，它聚合了数十种 Linter。
+- **CI 集成**: 必须在 CI/CD 流水线中加入 Lint 检查，不通过不允许合并。
+- **关键 Linter**:
+    - errcheck: 防止忽略错误。
+    - revive / golint: 检查代码风格。
+    - gocyclo: 检查圈复杂度（函数不要写太长）。
+    - staticcheck: 很多高级的 Bug 检测。
+##### 3. 命名规范
+- **包名**: 短小、全小写、单数，避免下划线（如 user 而非 user_service）。
+- **变量名**:
+    - **短生命周期**用短名字（如 i, ctx, req）。
+    - **长生命周期**或全局变量用描述性名字。
+    - **驼峰命名**（MixedCaps）。
+- **Getter/Setter**: Go 不推荐 GetData()，直接用 Data()；Setter 可以用 SetData()。
+- **接口**: 以 er 结尾（如 Reader, Writer, Worker）。
+
+##### 注释规范
+- 所有导出的函数、结构体、接口都必须有注释。
+- **格式**: 注释必须以被描述对象的名称开头。
+```Go
+// User represents a registered user in the system.
+type User struct { ... }
+```
+#### 标准布局
+##### 1. 核心目录
+- **/cmd**: 项目的主入口。每个应用程序一个目录，如 cmd/api-server/main.go。这里只做启动逻辑，不写业务逻辑。
+- **/internal**: **工程化的关键**。Go 编译器强制限制，放在这里的代码不能被外部项目 import。你的核心业务逻辑、私有库都应该放在这里，实现**封装**。
+- **/pkg**: 只有那些你明确希望被外部项目使用的库代码才放这里（现在的趋势是尽量多放 internal，少放 pkg）。
+
+##### 2. 业务分层 (Clean Architecture)
+虽然 Go 只有包的概念，但依然推荐分层：
+- **Transport/Handler 层**: 处理 HTTP/gRPC 请求，解析参数。
+- **Service/Logic 层**: 核心业务逻辑。
+- **Repository/DAO 层**: 数据持久化（DB, Redis）。
+- **Model/Domain 层**: 定义结构体和接口。
+
+##### 3. 依赖注入 (DI)
+- **避免全局变量**（Global State）：不要在包级别初始化 var DB *sql.DB。
+- **构造函数注入**: 通过 NewService(repo Repository) 显式传递依赖。
+- **工具**: 大型项目可使用 Google 的 Wire 进行编译时依赖注入。
+
+#### 编码实践
+##### 1. 错误处理 (Error Handling)
+这是 Go 代码写得好坏的分水岭。
+- **不要忽略错误**: 永远不要使用 _ 忽略 error。
+- **只处理一次**: 遇到错误要么降级处理，要么向上返回，不要即打日志又返回错误（会导致日志重复）。
+- **Wrap 错误**: 使用 Go 1.13+ 的 %w 进行错误包装，保留调用堆栈上下文。    
+    ```GO
+    if err != nil {
+        return fmt.Errorf("failed to query user: %w", err)
+    }
+    ```
+- **Sentinel Errors**: 预定义特定错误（如 ErrNotFound），方便上层 errors.Is() 判断。
+##### 2. 接口的使用 (Interfaces)
+- **接受接口，返回结构体**: 函数参数尽量定义为接口（为了测试和扩展），返回值尽量为具体类型。
+- **在消费端定义接口**: 不要在 user 包里定义 UserSaver 接口，而是在使用它的 auth 包里定义。这遵循了接口隔离原则。
+- **小接口**: 接口方法越少越好，越通用（如 io.Reader 只有一个方法）。
+##### 3. 并发控制 (Concurrency)
+- **Context 传递**: 所有长时间运行的函数（I/O, DB）首个参数必须是 context.Context，用于超时控制和链路追踪。
+- **不要滥用 Goroutine**: 开启 Goroutine 前必须想清楚它**何时退出**，否则就是内存泄漏。
+- **Mutex vs Channel**:
+    - 管理状态/数据竞争：用 sync.Mutex（性能更好，语义更明确）。
+    - 传递数据/信号/任务编排：用 Channel。
+- **Sync.WaitGroup**: 等待协程结束必须用 WaitGroup。
+
+#### 4. 选项模式 (Functional Options)
+当构造函数参数过多且有默认值时，不要用 Config 结构体，用选项模式：
+```GO
+func NewServer(addr string, opts ...Option) (*Server, error) { ... }
+```
+这具有极高的扩展性和向后兼容性。
+
+## Slice
+### 两个数组可以比较吗
+数组是可以通过`==`运算符进行比较的，但是必须满足两个条件：
+- 类型完全相同：数组的长度是类型的一部分，`[3]int`和`[4]int`是完全不同的类型，无法比较，编译都会报错
+- 元素类型可比较：数组中的元素必须支持`==`操作，如果数组包含`slice`、`map`或`func`等不可比较类型，那么这个数组也不可比较
+```Go
+func main() {
+    a := [3]int{1, 2, 3}
+    b := [3]int{1, 2, 3}
+    c := [3]int{1, 2, 4}
+    // d := [4]int{1, 2, 3, 4}
+
+    fmt.Println(a == b) // true
+    fmt.Println(a == c) // false
+    
+    // fmt.Println(a == d) // 编译错误：mismatched types [3]int and [4]int
+}
+```
+
+### 两个Slice可以比较吗
+不可以使用`==`运算符比较两个切片的内容
+切片只能和nil做比较：
+```Go
+var s []int
+fmt.Println(s == nil) // true
+```
+1. **引用类型的不确定性：** 切片是底层数组的引用。应该比较引用地址（即是否指向同一个底层数组）？还是比较包含的元素值？这在语义上容易产生歧义。
+2. **性能问题：** 如果支持 == 进行深比较（逐个元素比较），这可能是一个非常耗时的操作（时间复杂度 O(n)）。Go 语言希望 == 操作是高效且时间可控的。
+3. **安全隐患：** 切片可能包含自身（比如切片里套切片），如果支持深度遍历比较，可能会导致死循环或栈溢出。
+
+#### 如何正确比较两个Slice
+- 使用`slices.Equal`：
+```Go
+import "slices"
+
+func main() {
+    s1 := []int{1, 2, 3}
+    s2 := []int{1, 2, 3}
+    
+    if slices.Equal(s1, s2) {
+        fmt.Println("两个切片相等")
+    }
+}
+```
+- 手写循环：
+```Go
+func equal(a, b []int) bool {
+    if len(a) != len(b) {
+        return false
+    }
+    for i, v := range a {
+        if v != b[i] {
+            return false
+        }
+    }
+    return true
+}
+```
+- 如果是`[]byte`：
+```Go
+import "bytes"
+
+if bytes.Equal(byteSlice1, byteSlice2) {
+    // ...
+}
+```
+
+
+### ==slice的底层结构==
+slice的底层数据其实也是数组，slice是对数组的封装，它描述一个数组的片段。slice实际上是一个结构体，包含三个字段：长度、容量、底层数组。
+```Go
+type slice struct {
+	array unsafe.Pointer // 元素指针
+	len int // 长度
+	cap int // 容量
+}
+```
+![[images/Pasted image 20251105205923.png]]
+
+
+### ==slice的扩容机制==
+slice在进行append操作时，如果现有容量不足以容纳新的元素，Go运行时会自动为其扩容。扩容的机制如下：
+- 初始容量：新创建的切片默认容量为0或根据创建时提供的元素数量确定。
+- 扩容规则：当需要扩容时，Go的切片扩容机制通常是将其容量翻倍（`cap *= 2`），直到达到一定的阈值后（如1024），扩容策略改为每次增大约1/4，以降低大型切片的扩容开销。
+- 特殊情况：
+	- 当切片的当前容量小于1000时，Go可能并不会严格遵循上述翻倍策略，而是采用更保守的扩容策略，以适应小容量切片的需求
+	- 如果所需的新增容量远大于当前容量，Go可能会直接将容量设置为所需容量，而不是简单地翻倍
+- 性能考量：扩容操作伴随着内存分配和数据拷贝，因此在编写代码时应尽量避免过于频繁的扩容操作，可以预先估计数据量并使用make函数指定合适的初始容量。
+
+Go1.18及以后，引入了新的扩容机制：
+当原slice容量（oldcap）小于256的时候，新slice（newcap）容量为原来的2倍；原slice容量超过256，新slice的容量`newcap = oldcap+(oldcap+3*256)/4`
+
+### 从一个slice截取出另一个slice，修改新slice的值会影响到原来的slice的内容吗
+在截取完之后，如果新切片没有触发扩容，则修改切片元素会影响原切片，如果触发了扩容则不会。
+
+示例：
+```Go
+func main() {
+	slice := []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+	s1 := slice[2:5]
+	s2 := s1[2:6:7]
+	
+	s2 = append(s2, 100)
+	s2 = append(s2, 200)
+	
+	s1[2] = 20
+	
+	fmt.Println(s1)
+	fmt.Println(s2)
+	fmt.Println(slice)
+}
+
+// [2 3 20]
+// [4 5 6 7 100 200]
+// [0 1 2 3 20 5 6 7 100 9]
+```
+`s1`从`slice`索引2（闭区间）到索引5（开区间，元素真正取到索引4），长度为3，容量默认到数组结尾，为8。
+`s2`从`s1`的索引2（闭区间）到索引6（开区间，元素真正取到索引5），容量到索引7（开区间，真正到索引6），为5.
+![[images/Pasted image 20251105212631.png]]
+接着，向`s2`尾部追加一个元素100。`s2`容量刚好够，直接追加，不过，这会修改原始数组对应位置的元素。这一改动，数组和`s1`都可以看得到。
+![[images/Pasted image 20251105212822.png]]
+再次向`s2`追加元素200。这时，`s2`的容量不够用了，该扩容了。于是，`s2`另起炉灶，将原来的元素复制到新的位置，扩大自己的容量。并且为了应对未来可能的`append`带来的再一次扩容，`s2`会在此次扩容的时候多留一些`buffer`，将新的容量将扩大为原始容量的2倍，也就是10了。
+![[images/Pasted image 20251105213058.png]]
+最后修改`s1`索引为2位置的元素。但是这次修改只会影响原始数组相应位置的元素。它影响不到`s2`，因为已经不是一个底层数组。
+在打印`s1`的时候，只会打印`s1`长度以内的元素。所以只会打印出3个元素，即使它的底层数组不止3的元素。
+
+### slice作为函数参数传递，会改变原slice吗
+当slice作为函数参数时，因为会拷贝一份新的slice作为实参，所以原来的slice作为实参，所以原来的slice结构并不会被函数中的操作改变，也就是说，slice其实是一个结构体，包含了三个成员：len，cap，array并不会变化。但是需要注意的是，尽管slice结构不会变，但是其底层数组的数据如果有修改的话，则会发生变化。若传的是slice的指针，则原slice结构会变，底层数组的数据也会变。
+示例：
+```Go
+package main
+
+func main() {
+	s := []int{1, 1, 1}
+	f(s)
+	fmt.Println(s)
+}
+
+func f(s []int) {
+	// i只是一个副本，不能改变s中元素的值
+	/* for _, i := range s {
+		i++
+	}
+	*/
+	
+	for i := range s {
+		s[i] += 1
+	}
+}
+
+// [2 2 2]
+```
+可以看到改变了原始slice的底层数据。这里传递的是一个slice的副本，在`f`函数中，`s`只是`main`函数中`s`的一个拷贝。在`f`函数内部，对`s`的作用并不会改变外层`main`函数的`s`的结构。
+要想真的改变外层slice，只有将返回新的slice复制到原来的slice，或者向函数传递一个指向slice的指针。
+示例：
+```Go
+package main
+
+import "fmt"
+
+func myAppend(s []int) []int {
+	// 这里s虽然改变了，但并不会影响外层函数的s
+	s = append(s, 100)
+	return s
+}
+
+func myAppendPtr(s *[]int) {
+	// 会改变外层s本身
+	*s = append(*s, 100)
+	return 
+}
+
+func main() {
+	s := []int{1, 1, 1}
+	newS := myAppend(s)
+	
+	fmt.Println(s)
+	fmt.Println(newS)
+	
+	s = newS
+	
+	myAppendPtr(&s)
+	fmt.Println(s)
+}
+
+// [1 1 1]
+// [1 1 1 100]
+// [1 1 1 100 100]
+```
+`myAppend`函数里，虽然改变了`s`，但它只是一个值传递，并不会影响外层的`s`
+而`newS`是一个新的slice，它是基于`s`得到的。因此它打印的是追加了一个`100`之后的结果：`[1 1 1 100]`
+最后，将`newS`赋值给了`s`，`s`这时才真正变成了一个新的slice。之后，再给`myAppendPtr`函数传入一个`s指针`，这回它真的被改变了：`[1 1 1 100 100]`
+
+```Go
+// 未发生扩容
+package main  
+  
+import "fmt"  
+  
+func main() {  
+    a := make([]int, 10)  
+    fmt.Println(a)  
+    changeSlice(a)  
+    fmt.Println(a)  
+}  
+  
+func changeSlice(s []int) {  
+    s[0] = 200  
+    fmt.Println(s)  
+}
+// 返回
+// [0 0 0 0 0 0 0 0 0 0]
+// [200 0 0 0 0 0 0 0 0 0]
+// [200 0 0 0 0 0 0 0 0 0]
+```
+```Go
+// 发生扩容
+package main  
+  
+import "fmt"  
+  
+func main() {  
+    a := make([]int, 10)  
+    fmt.Println(a)  
+    changeSlice(a)  
+    fmt.Println(a)  
+}  
+  
+func changeSlice(s []int) {  
+	s = append(s, 100)
+    s[0] = 200  
+    fmt.Println(s)  
+}
+
+// 返回
+// [0 0 0 0 0 0 0 0 0 0]
+// [200 0 0 0 0 0 0 0 0 0 100]
+// [0 0 0 0 0 0 0 0 0 0]
+```
+```Go
+// 未发生扩容
+package main  
+  
+import "fmt"  
+  
+func main() {  
+    a := make([]int, 0, 10)  
+    for i := 0; i < 5; i++ {  
+       a = append(a, 0)  
+    }  
+    fmt.Println(a)  
+    changeSlice(a)  
+    fmt.Println(a)  
+}  
+  
+func changeSlice(s []int) {  
+    s = append(s, 1)  
+    s[0] = 200  
+    fmt.Println(s)  
+}
+
+// 返回
+// [0 0 0 0 0]
+// [200 0 0 0 0 1]
+// [200 0 0 0 0]
+```
+
+
+## Map
+### ==Map的底层实现==
+Go Map的底层实现就是一个哈希表。它在运行时表现为指向`hmap`结构的指针，`hmap`中记录了桶数组指针`buckets`、溢出桶指针、元素个数等字段。每个桶是一个`bmap`结构体，能存储8个键值对和8个`tophash`，并有指向下一个溢出桶的指针`overflow`。为了内存紧凑，`bmap`中采用先存8个键再存8个值的存储方式。
+```Go
+type hmap struct {
+	count int // map中元素个数
+	flags uint8 // 状态标志位，标记map的一些状态
+	B uint8 // 桶数以2为底的对数，即B=log_2(len(buckets))，比如B=3，那么桶数为2^3=8
+	noverflow uint16 // 溢出桶数量近似值
+	hash0 uint32 // 哈希种子
+	
+	buckets unsafe.Pointer // 指向buckets数组的指针
+	oldbuckets unsafe.Pointer // 是一个指向buckets数组的指针，在扩容时，oldbuckets指向老的buckets数组（大小为buckets数组的一半），非扩容时，oldbuckets为空
+	nevacuate uintptr // 表示扩容进度的一个计时器，小于该值的桶已经完成迁移
+	
+	extra *mapextra // 指向mapextra结构的指针，mapextra存储map中的溢出桶
+}
+```
+![[images/Pasted image 20251113225735.png]]
+bmap结构如下：
+![[images/Pasted image 20251113225751.png]]
+
+### Map的遍历是有序的还是无序的
+Go中的Map的遍历是完全随机的，并没有固定的顺序。map每次遍历，都会从一个随机值序号的桶，在每个桶中，再按照之前选定的随机槽位开始遍历，所以是无序的
+
+### ==Map的遍历为什么设计成无序的==
+map在扩容后，会发生key的搬迁，原来落在同一个bucket中的key，搬迁后，有些key就要远走高飞了。而遍历的过程，就是按顺序遍历bucket，同时按顺序遍历bucket中的key。搬迁后，key的位置发生了重大的变化，有些key飞上枝头，有些key原地不动。这样，遍历map的结果就不可能按原来的顺序了。
+
+### Map如何实现顺序读取
+如果业务上需要有序遍历，最规范的做法是将Map的键（Key）取出来放入一个切片（Slice）中，用`sort`包对切片进行排序，然后根据这个有序的切片去遍历Map
+
+### ==Map是不是并发安全的==
+首先要理解什么是并发安全。并发安全指的是当一个数据结构或函数在多个goroutine同时访问时，能够保持正确性和一致性，不会出现数据竞争、崩溃、或不可预知的行为。
+一个数据结构或操作是并发安全的，当且仅当：
+- 任意数量的goroutine可以同时读写它
+- 无需外部同步机制（锁、channel等）
+- 结果始终符合预期，不会破坏内部状态或导致运行时错误
+
+==Go中的普通的map不是并发安全的==。
+在查找、赋值、遍历、删除的过程中都会检测写标志，一旦发现写标志置为1，则直接panic。赋值和删除函数在检测完写标志是复位后，先将写标志位置位，才会进行后面的操作
+
+检测写标志：
+```Go
+if h.flags&hashWriting == 0 {
+	throw("concurrent map writes")
+}
+```
+设置写标志：
+```Go
+h.flags |= hashWriting
+```
+
+### ==如何实现线程安全的map==
+- 使用读写锁`sync.RWMutex`：通过结构体将`map`和`sync.RWMutex`封装在一起，读操作加读锁（RLock），写操作加写锁（Lock）
+例：
+```Go
+type SafeMap struct {
+    mu   sync.RWMutex
+    data map[string]int
+}
+
+func NewSafeMap() *SafeMap {
+    return &SafeMap{
+        data: make(map[string]int),
+    }
+}
+
+// 写操作：加互斥锁
+func (m *SafeMap) Set(key string, value int) {
+    m.mu.Lock()
+    defer m.mu.Unlock()
+    m.data[key] = value
+}
+
+// 读操作：加读锁（允许多个 reader 同时读取）
+func (m *SafeMap) Get(key string) (int, bool) {
+    m.mu.RLock()
+    defer m.mu.RUnlock()
+    val, ok := m.data[key]
+    return val, ok
+}
+```
+
+- 直接使用`sync.Map`：`sync.Map`是官方提供的并发安全map
+	- 它采用空间换时间的策略，内部维护了两个map：
+		- read map（只读/原子操作）：优先读取这里，不需要加锁（使用atomic）
+		- dirty map（加锁读写）：新写入的数据先放这里。当miss次数过多，dirty map会升级为read map
+	- 适用场景：
+		- 读远多于写
+		- Key集合互不相交
+```Go
+import "sync"
+
+func main() {
+    var m sync.Map
+
+    // 1. 存储 (Store)
+    m.Store("name", "Go")
+
+    // 2. 读取 (Load)
+    val, ok := m.Load("name")
+    if ok {
+        // sync.Map 存储的是 interface{}，取出需要断言
+        fmt.Println(val.(string)) 
+    }
+
+    // 3. 读取或写入 (LoadOrStore)
+    // 如果存在就返回旧值，不存在就存入新值
+    actual, loaded := m.LoadOrStore("age", 18)
+
+    // 4. 删除 (Delete)
+    m.Delete("name")
+    
+    // 5. 遍历 (Range)
+    m.Range(func(key, value any) bool {
+        fmt.Println(key, value)
+        return true // 返回 true 继续遍历，false 停止
+    })
+}
+```
+
+- 分片锁：可以将一个大map拆分成N个小map（分片），每个分片有自己的锁
+	- 使用Hash算法：`shardIndex := hash(key) % shardCount`，将key分散到不同的分片中，从而降低锁的粒度
+	- 适用场景：极高并发的写操作场景（如本地缓存库）
+```Go
+// 概念示例（非完整代码）
+type ShardedMap struct {
+    shards []*SafeMap // 包含 N 个带锁的小 Map
+    count  int        // 分片数量
+}
+
+func (m *ShardedMap) GetShard(key string) *SafeMap {
+    // 假设有一个 hash 函数
+    idx := fnv32(key) % uint32(m.count) 
+    return m.shards[idx]
+}
+
+func (m *ShardedMap) Set(key string, value int) {
+    shard := m.GetShard(key)
+    shard.mu.Lock() // 只锁住这一个小分片，其他分片仍可并发访问
+    defer shard.mu.Unlock()
+    shard.data[key] = value
+}
+```
+
+### Map的key一定要可比较吗
+Map的key必须要可比较
+首先，Map会对我们提供的Key进行哈希运算，得到一个哈希值。这个哈希值决定了这个键值对大概存储在哪个位置（哪个桶）。然而，不同的key可能会产生相同的哈希值，这就是“哈希冲突”。当多个Key被定位到一个桶里，Map就没法只靠哈希值来进行区分。此时，它必须在桶内进行逐个遍历，用我们传入的Key和桶里已有的每一个Key进行比较。这样才能确保我们操作的是正确的键值对。
+
+### ==Map的扩容时机==
+向map中插入新key的时候，会进行条件检测，符合下面2个条件，就会触发扩容：
+- 装载因子超过阈值，源码里定义的阈值为6.5，这个时候会触发双倍扩容
+- overflow的bucket数量过多：
+	- 当B小于15时，也就是bucket总数2^B小于2^15时，如果overflow的bucket数量超过2^B 
+	- 当B>=15，也就是bucket总数2^B大于等于2^15，如果overflow的bucket数量超过2^15 
+	- 在这两种情况下会触发等量扩容
+
+### ==Map的扩容过程==
+Go的map的扩容是渐进式的。它不会在触发扩容时“stop the world”来一次性把所有数据搬迁到新空间，而是只分配新空间，然后在后续的每一次插入、修改或删除操作时，才会顺便搬迁一两个旧桶的数据。这种设计将庞大的扩容成本分摊到了多次操作中，极大减少了服务的瞬间延迟（STW），保证了性能的平滑性。
+如果是触发双倍扩容，会新建一个buckets数组，新的buckets数量大小是原来的2倍，然后旧buckets数据搬迁到新的buckets。如果是等量扩容，buckets数量维持不变，重新做一遍类似双倍扩容的搬迁动作，把松散的键值对重新排列一次，使得同一个buckets中的key排列地更紧密，这样节省空间，存取效率更高
+
+### 可以对Map的元素取地址吗
+无法对map的key或value取址。会发生编译报错，这样设计是因为map一旦发生扩容，key和value的位置就会改变，之前保存的地址就会失效
+
+### Map中删除一个key，它的内存会释放吗
+并不会，`delete`一个key，并不会立刻释放或收缩Map占用的内存。具体来说，`delete(m, key)`这个操作，只是把key和value对应的内存块标记为“空闲”，让它们的内容可以被后续的垃圾回收（GC）处理掉。但是Map底层为了存储这些键值对而分配的“桶”数组，它的规模是不会缩小的。只有在置空这个map的时候，整个map的空间才会被GC后释放。
+![[images/Pasted image 20251114101756.png]]
+
+### Map可以边遍历边删除吗
+map不是并发安全的数据结构。如果多个goroutine边遍历，边删除，同时读写一个map是未定义的行为，如果被检测到，会直接panic。
+
+如果在同一个goroutine内边遍历边删除，并不会检测到同时读写，理论上是可以进行的。但是遍历的结果就可能不是相同的了，有可能遍历结果集中包含了删除的key，也有可能不包含，这取决于删除key的时间：是在遍历到key所在的bucket时刻前或后。
+
+## Channel
+### ==什么是CSP==
+CSP（Communicating Sequential Process，通信顺序进程）并发编程模型，它的核心思想是：通过通信共享内存，而不是通过共享内存来通信。Go的Goroutine和Channel机制，就是CSP的经典实现，具有以下特点：
+- 避免共享内存：goroutine不直接修改变量，而是通过channel通信
+- 天然同步：channel的发送/接收自带同步机制，无需手动加锁
+- 易于组合：channel可以嵌套使用，构建复杂并发模式
+
+
+### ==Channel的底层实现原理==
+Channel的底层是一个名为`hchan`的结构体，核心包含几个关键组件：
+- 环形缓冲区：有缓冲channel内部维护一个固定大小的环形队列，用`buf`指针指向缓冲区，`sendx`和`recvx`分别记录发送和接收的位置索引。这样设计能高效利用内存，避免数据搬移
+- 两个等待队列`sendq`和`recvq`：用来管理阻塞的goroutine。`sendq`存储因channel满而阻塞的发送者，`recvq`存储因channel空而阻塞的接收者。这些队列用双向链表实现，当条件满足时会唤醒对应的goroutine
+- 互斥锁：`hchan`内部有个mutex，所有的发送、接收操作都需要先获取锁，用来保证并发安全。虽然看起来可能影响性能，但Go的调度器做了优化，大多数情况下锁竞争并不激烈
+hchan定义如下：
+```Go
+type hchan struct {  
+    qcount   uint           // chan里元素数量  
+    dataqsiz uint           // chan底层循环数组的长度 
+    buf      unsafe.Pointer // 指向环形队列（数组）的指针，如果是有缓冲channel，这里存储数据
+    elemsize uint16 // chan中元素大小
+	closed uint32 // chan是否被关闭的标志 
+    elemtype *_type // chan中元素类型
+    sendx    uint   // 队尾索引（发送数据写入的位置） 
+    recvx    uint   // 队头索引（接收数据读取的位置）
+    recvq    waitq  // 等待接收的goroutine队列（双向链表）
+    sendq    waitq  // 等待发送的goroutine队列（双向链表）
+    lock mutex  // 保护hchan中的所有字段，channel并不是无锁队列，它的高性能主要得益于锁的粒度控制和调度器的配合
+}
+```
+![[images/Pasted image 20251123155100.png]]
+### ==向channel中发送数据的过程是怎么样的==
+向channel发送数据的过程都会在mutex的保护下进行，保证并发安全：
+1. 首先检查是否有等待的接收者。如果`recvq`队列不为空，说明有goroutine在等待接收数据，这时会把数据传递给等待的接收者，跳过缓冲区，这是最高效的路径。同时回唤醒对应的goroutine继续执行
+2. 如果没有等待接收者，就尝试写入缓冲区。检查缓冲区是否还有空间，如果`qcount < dataqsiz`，就把数据复制到`buf[sendx]`位置，然后更新`sendx`索引和`qcount`计数。这是无缓冲或缓冲区未满时的正常流程
+3. 当缓冲区满了就需要阻塞等待。创建一个`sudog`结构体包装当前goroutine和要发送的数据，加入到`sendq`等待队列中，然后调用`gopark`让当前goroutine进入阻塞状态，让出CPU给其他goroutine
+被唤醒后继续执行。当有接收者从channel读取数据后，会从`sendq`中唤醒一个等待的发送者，被唤醒的goroutine会完成数据发送并继续执行
+==还有个特殊情况是，向已关闭的channel发送数据会直接panic==
+```Go
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func goroutineA(a <-chan int) {
+	val := <-a
+	fmt.Println("goroutine A received data: ", val)
+	return
+}
+
+func goroutineB(b <-chan int) {
+	val := <-b
+	fmt.Println("goroutine B received data: ", val)
+	return
+}
+
+func main() {
+	ch := make(chan int)
+	go goroutineA(ch)
+	go goroutineB(ch)
+	ch <- 3
+	time.Sleep(time.Second)
+	
+	ch1 := make(chan struct{})
+}
+```
+在第17行，主协程向ch发送了一个元素3
+
+sender发现ch的recvq里有receiver在等待着接收，就会出队一个sudog，把recvq里first指针的sudog”推举“出来了，并将其加入到P的可运行goroutine队列中。然后，sender把发送元素拷贝到sudog的elem地址处，最后会调用goready将G1唤醒，状态变为runnable
+![[images/Pasted image 20251126215221.png]]
+当调度器光顾G1时，将G1编程running状态，执行goroutineA接下来的代码。G表示其他可能有的goroutine。
+
+这里其实涉及到一个协程写另一个协程栈的操作。有两个receiver在channel的一边虎视眈眈地盯着，这时channel另一边来了一个sender准备向channel发送数据，为了高效，用不着通过channel的buf”中转“一次，直接从源地址把数据copy到目的地址就可以了
+![[images/Pasted image 20251126223511.png]]
+3会被拷贝到G1栈上的某个位置，也就是val的地址处，保存在elem字段
+
+### 从channel读取数据的过程是怎么样的
+从channel读取数据也有几个关键步骤：
+1. 首先检查是否有等待的发送者。如果`sendq`队列不为空，说明有goroutine在等待发送数据。对于无缓冲channel，会直接从发送者那里接收数据；对于有缓冲channel，会先从缓冲区取数据，然后把等待发送者的数据放入缓冲区，这样保证FIFO顺序
+2. 如果没有等待发送者，尝试从缓冲区读取。检查`qcount > 0`，如果缓冲区有数据，就从`buf[recvx]`位置取出数据，然后更新`recvx`索引和`qcount`计数，这是缓冲区有数据时的正常路径
+缓冲区为空时需要阻塞等待。创建`sudog`结构体包装当前goroutine。加入到`recvq`等待队列，调用`gopark`进入阻塞状态。当有发送者写入数据时，会被唤醒继续执行
+从已关闭channel读取有特殊处理。如果channel已关闭且缓冲区为空，会返回零值和false标志；如果缓冲区还有数据，可以正常读取直到清空。这就是为什么`v, ok := <-ch`中的ok，能判断channel状态的原因
+
+### ==从一个已关闭的channel仍能读出数据吗==
+从一个有缓冲的channel里读数据，当channel被关闭，依然能读出有效值。只有当返回的ok为false时，读出的数据才是无效的。
+从一个无缓冲的channel里读数据，当channel被关闭，会读出零值
+
+### ==channel在什么情况下会引起内存泄漏==
+channel引起内存泄漏最常见的是引起goroutine泄漏从而导致的间接内存泄漏，当goroutine阻塞在channel操作上永远无法退出时，goroutine本身和它引用的所有变量都无法被GC回收。比如一个goroutine在等待接收数据，但发送者已经退出，这个接收者就将永远阻塞下去。或者select语句使用不当，在没有default分支的select中，如果所有case都无法执行，goroutine就将永远阻塞。出现内存泄漏
+
+### 关闭channel会产生异常吗
+试图重复关闭一个channel、关闭一个nil值的channel都将会导致panic异常
+
+### 关闭一个只接收的channel
+关闭一个只接收的channel会导致编译错误，程序无法运行。这是一种保护机制，遵循”谁发送，谁关闭”的原则。接收方不应该有关闭channel的权限，因为它不知道发送方是否还有数据要发送。
+
+### 关闭一个只写的channel
+在 Go 语言中，close() 函数允许接受一个**双向通道**或**只写通道**（chan<- T）作为参数。
+
+### 三种通道的应用场景
+#### 双向通道（`chan T`）
+双向通道是我们通过 make 关键字创建出来的原始对象。它既能存（Send），也能取（Receive）。
+- **应用场景**：
+    - **初始化**：在主函数（main）或协调层中创建通道。
+    - **传递**：作为参数传递给具体的协程。在传递的过程中，它通常会**隐式转换**为单向通道。
+- **特点**：它是所有单向通道的源头。
+```Go
+func main() {
+    // 1. 创建双向通道
+    ch := make(chan int)
+
+    // 2. 传给生产者（自动转为只写）
+    go producer(ch)
+
+    // 3. 传给消费者（自动转为只读）
+    go consumer(ch)
+}
+```
+
+#### 只写通道（`chan<- T`）
+只写通道就像一个“单向投递口”（例如邮筒），你只能往里塞信件，不能把别人的信件掏出来。
+- **应用场景**：
+    - **数据生成器**：函数负责生成数据并发送。
+    - **任务分发**：主程将任务 ID 发送给工作池（Worker Pool）。
+- **核心作用（为什么要限制只写？）**：
+    1. **防止窃取数据**：如果生产者也能读通道，它可能会不小心读出自己或其他生产者刚发进去的数据，导致真正的消费者拿不到数据。
+    2. **明确关闭责任**：**只写通道允许执行 close()**。这符合“谁生产，谁负责关闭”的原则。
+```Go
+// 参数声明为只写：chan<- int
+func producer(out chan<- int) {
+    for i := 0; i < 5; i++ {
+        out <- i // ✅ 合法：写入数据
+    }
+    // x := <-out // ❌ 编译错误：不能读取
+    close(out)    // ✅ 合法：生产者负责关闭
+}
+```
+
+#### 只读通道（`<-chan T`）
+只读通道就像一个“水龙头”，你只能接水，不能往里注水，也不能把水龙头拆了（Close）。
+- **应用场景**：
+    - **数据处理**：接收上游发来的数据进行计算。
+    - **等待信号**：<-ctx.Done() 就是最典型的只读通道，用来监听退出信号。
+    - **函数返回值**：通常用于**Future模式**或**生成器模式**，函数返回一个只读通道，调用者从中获取结果。
+- **核心作用（为什么要限制只读？）**：
+    1. **防止乱发数据**：消费者不应该向数据流中注入数据，破坏逻辑。
+    2. **防止非法关闭**：**只读通道禁**
+```Go
+// 参数声明为只读：<-chan int
+func consumer(in <-chan int) {
+    for v := range in { // ✅ 合法：读取数据
+        fmt.Println(v)
+    }
+    // in <- 1   // ❌ 编译错误：不能写入
+    // close(in) // ❌ 编译错误：不能关闭
+}
+```
+
+#### 综合应用
+```Go
+package main
+
+import "fmt"
+
+// 1. 生成器：返回一个只读通道
+// 这里的 out 在函数内部是双向的，但在返回时被限制为只读
+func generator() <-chan int {
+    out := make(chan int)
+    go func() {
+        for i := 0; i < 3; i++ {
+            out <- i
+        }
+        close(out)
+    }()
+    return out
+}
+
+// 2. 处理器：接收只读，输出只读（中间件）
+// in: 我只负责读，我不负责关
+// return: 下游只能读我的结果
+func squarer(in <-chan int) <-chan int {
+    out := make(chan int)
+    go func() {
+        for v := range in {
+            out <- v * v
+        }
+        close(out)
+    }()
+    return out
+}
+
+// 3. 主函数
+func main() {
+    // 这里的 gen 和 sq 都是 <-chan int 类型
+    gen := generator() 
+    sq := squarer(gen)
+
+    // 最终消费
+    for res := range sq {
+        fmt.Println(res)
+    }
+}
+```
+
+### channel发送和接收数据是值传递还是引用传递
+值传递。Go语言中都是值传递。如果是指针或包含指针的结构体，传递的是指针的值（地址），但这仍然是内存拷贝
+
+### ==往一个关闭的channel写入数据会发生什么==
+往已关闭的channel写入数据会直接panic
+向已关闭的channel发送数据时，runtime会检测到channel的`closed`标志位已经设置，立即抛出"send on closed channel"的panic。这个检查发生在发送操作的最开始阶段，甚至在获取mutex锁之前就会进行判断，所以不会有任何数据写入的尝试，直接就panic了。
+
+### 什么是select
+select是专门位channel操作设计的多路复用控制结构
+核心作用是同时监听多个channel操作。当有多个channel都可能有数据收发时，select能够选择其中一个可执行的case进行操作，而不是按顺序逐个尝试。比如同时监听数据输入、超时信号、取消信号等
+
+### ==select的执行机制是怎么样的==
+select的执行机制是随机选择。如果多个case同时满足条件，Go会随机选择一个执行，这避免了饥饿问题。如果没有case能执行就会执行default，如果没有default，当前goroutine会阻塞等待
+
+### ==select的实现原理是怎样的==
+Go语言实现`select`时，定义了一个数据结构scase表示每个`case`语句（包含`default`）。scase结构包含channel操作、操作类型等信息。select操作的整个过程通过selectgo函数在runtime层面实现。
+
+Go运行时会将所有case进行随机排序，这是为了避免饥饿问题。然后执行两轮扫描策略：第一轮直接检查每个channel是否可读写，如果找到就绪的立即执行；如果都没就绪，第二轮就把当前goroutine加入到所有channel的发送或接收队列中，然后调用gopark进入睡眠状态，使当前gotoutine让出CPU
+
+当某个channel变为可操作时，调度器会唤醒对应的goroutine，此时需要从其他的channel的等待队列中清理掉这个goroutine，然后执行对应的case分支。
+
+其核心原理就是：case随机化+双重循环检测
+
+scase结构定义：
+```Go
+type scase struct {
+	c *hchan // channel指针
+	elem unsafe.Pointer // 数据元素指针，用于存放发送/接收的数据
+	kind uint16 // case类型：caseNil、caseRecv、caseSend、caseDefult
+	pc uintptr // 程序计数器，用于调试
+	releasetime int64 // 释放时间，用于竟态检测
+}
+```
+![[images/Pasted image 20251127233126.png]]
+在默认情况下，select语句会在编译阶段经过如下过程的处理：
+1. 将所有的`case`转换成包含`Channel`以及类型等信息的scase结构体
+2. 调用运行时函数`selectgo`获取被选择的`scase`结构体索引，如果当前的`scase`是一个接收数据的操作，还会返回一个指示当前`case`是否时接收的布尔值
+3. 通过`for`循环生成一组`if`语句，在语句中判断自己是不是被选中的`case`
+
+### ==带缓冲和无缓冲channel==
+- 无缓冲channel：像打电话。发送方说一句话，必须等接收方听到了，才能说下一句。如果没有人接电话，就只能一直拿着电话等。这是同步的。
+	- 特点：强同步，保证交付
+	- 应用场景：
+		- 信号传递与流程控制，例如`context.Done()`
+		- 保证数据被处理，如支付系统中，扣款服务发送消息给发货服务，必须确认发货服务接到了单子，扣款服务才能结束
+- 带缓冲channel：像发邮件。你将信扔进信箱就走了，不需要管对方有没有立刻看。信箱满了你才需要看。这是异步的
+	- 特点：解耦、削峰填谷、异步
+	- 应用场景：
+		- 生产者-消费者，生产者生产速率和消费者消费速率不一致，缓冲区充当了队列的角色
+		- 限制并发数，利用缓冲区的容量来限制同时运行的goroutine数量
+		- 降低延迟
+
+默认优先使用无缓冲channel，因为其行为更简单、更确定，不易出错
+当明确需要处理突发流量、限制并发数量或不想让生产者等待慢速消费者时，再考虑使用带缓冲channel
+
+
+## Context
+### ==Context是什么==
+context实际上就是一个接口，提供了`Deadline()`、`Done()`、`Err()`、`Value()`四种方法。
+它本质上是一个信号传递和范围控制的工具。它的核心作用是在一个请求处理链路中（跨越多个函数和goroutine），优雅地传递取消信号（cancellation）、超时（timeout）、截止日期（deadline），并能携带一些范围内的键值对数据。
+```Go
+type Context interface {
+	Deadline() (deadline time.Time, ok bool) 
+	Done() <-chan struct{} 
+	Err() error
+	Value(key interface{}) interface{}
+}
+```
+- `Deadline()`：返回一个时间点，告知任务何时应该被取消
+- `Done()`：返回一个channel，当context被取消或者超时，这个channel会被关闭。这是goroutine监听取消新的核心
+- `Err()`：在`Done()`的channel关闭后，它会解释关闭的原因，是主动取消还是超时
+- `Value()`：允许context在调用链中携带请求范围的键值对数据
+
+### ==Context的作用==
+Go的context主要解决三个核心问题：**超时控制**、**取消信号传输**、**请求级数据传递**
+在实际项目中，我们最常用的是超时控制。比如一个HTTP请求需要调用多个下游服务，我们通过`context.WithTimeout`设置整体超时时间，当超时发生时，所有子操作都会收到取消信号并立即退出，避免资源浪费。取消信号的传播是通过Context的层级结构实现的，父context取消时，所有子context都会自动取消。
+另外，context还能传递请求级的元数据，比如用户ID、请求ID等，这在分布式链路追踪中特别有用。需要注意的是，context应该作为函数的第一个参数传递，不要存储在结构体中，并且传递的数据应该是请求级的，不要滥用。
+![[images/Pasted image 20251127212731.png]]
+
+### Context.Value的查找过程是怎么样的
+context.Value的查找过程是一个链式递归查找的过程，从当前context开始，沿着父context链一直向上查找直到找到对应的key或者到达根context
+
+当调用`ctx.Value(key)`时，首先检查当前context是否包含这个key，如果当前层没有，就会调用`parent.Value(key)`继续向上查找。这个过程会一直递归下去，直到找到匹配的key返回对应的value，或者查找到根context返回nil
+![[images/Pasted image 20251127213738.png]]
+
+### context是如何被取消的
+context的取消是通过channel关闭信号实现的，主要有三种取消方式
+首先是主动取消，通过`context.WithCancel`创建的context会返回一个cancel函数，调用这个函数就会关闭内部的done channel，所有监听这个context的goroutine都能通过`ctx.Done()`收到取消信号。
+其次是超时取消，`context.WithTimeout`和`context.WithDeadline`会启动一个定时器，到达指定时间后自动调用cancel函数触发取消
+最后是级联取消，当父context被取消时，所有子context会自动被取消，这是通过context树的结构实现的
+![[images/Pasted image 20251127214145.png]]
+
+## ==GMP==
+### ==Goroutine和系统线程有什么区别==
+主要是调度模型、资源开销、以及管理方式的设计不同
+在调度模型上：系统线程属于内核调度，而goroutine属于运行时调度。系统线程采用一对一的调度模型，一个用户线程绑定一个内核线程，完全由操作系统内核调度。调度时需要切换内核态。而goroutine采用M对N调度模型，M个内核线程对应N个goroutine，N远大于M。由Go运行时的GMP调度器在用户态调度，调度时无需陷入内核，仅在用户态切换，开销较小。
+在资源开销上：系统线程的初始栈大小固定且比较大，是静态栈，创建 / 销毁时需要内核分配 / 回收资源，内存开销高，所以不能创建太多（一般几千个就到瓶颈）。而goroutine初始栈极小，支持动态扩容 / 缩容（最大可达 GB 级），创建 / 销毁由运行时在用户态完成，无需内核介入，内存开销极低，所以能轻松创建数十万甚至上百万个。
+在阻塞行为和调度策略上：系统线程遇到IO阻塞或系统调用，线程会被内核挂起，直至阻塞解除，期间会占用内核资源，导致并发效率下降。goroutine在遇到IO阻塞时，会把当前goroutine从M-P绑定中剥离，让M去调度其他就绪的goroutine。系统调用时，M 会暂时和 P 解绑，P 会绑定新的 M 继续执行其他 G，等系统调用完成后，原 G 再重新关联 P-M 继续执行 —— 这样不会浪费 CPU 资源，保证高并发效率。
+管理方式：系统线程：需要开发者手动创建（如 pthread_create）、销毁、同步（如锁、信号量），管理成本高，容易出现内存泄漏、线程泄漏等问题。goroutine：通过`go func()`关键字就能创建，运行时自动管理生命周期（函数执行完就销毁），还内置了通道（channel）、select 等同步机制，开发效率高，能减少并发 bug。
+
+
+### ==GMP模型是什么==
+GMP是Go运行时的核心调度模型
+
+GMP含义：
+- G：goroutine，协程
+- M：machine，系统线程
+- P：processor，逻辑处理器，它是G和M之间的桥梁，负责调度G
+	- P的数量默认等于CPU核心数
+
+调度逻辑是这样的，M必须绑定P才能执行G。每个P维护一个自己的本地G队列（长度256），M从P的本地列取G执行。当本地列为空时，M会按优先级从全局队列、网络轮询器、其他P队列中窃取goroutine，这是work-stealing机制
+![[images/Pasted image 20251127214546.png]]
+
+### 什么是Go scheduler
+Go scheduler就是Go运行时的协程调度器，负责在系统线程上调度执行goroutine。它是Go runtime的一部分，它内嵌在Go程序中，和Go程序一起运行。它的主要工作是决定哪个goroutine在哪个线程上运行，以及何时进行上下文切换。scheduler的核心是`schedule()`函数，它在无限循环中寻找可运行的goroutine。当找到后通过`execute()`函数切换到goroutine执行，goroutine主动让出或被抢占时再回到调度循环。
+
+### ==Go在进行goroutine调度的时候，调度策略是怎样的==
+Go语言采用的是抢占式调度策略。Go会启动一个线程，一直运行着`sysmon`函数，sysmon运行在M上，且不需要P。当sysmon发现M已运行同一个G10ms以上时，它会将该G的内部参数`preempt`设置为true，表示需要被抢占，让出CPU了。
+调度策略基于信号的异步抢占机制，sysmon会检测到运行了10ms以上的G。然后，sysmon向运行G的M发送信号（SIGURG）。Go的信号处理程序会调用M上的一个叫做gsignal的goroutine来处理该信号，并使其检查该信号。gsignal看到抢占信号，停止正在运行的G
+
+### 发生调度的时机有哪些
+- 等待读取或写入未缓冲的通道
+- 由于time.Sleep()而等待
+- 等待互斥量释放
+- 发生系统调用
+
+### ==M寻找可运行G的过程是怎么样的==
+M会优先检查本地队列（LRQ）：从当前P的LRQ里`runqget`一个G。（无锁CAS），如果本地队列没有可运行G，再次检查全局队列（GRQ）去全局队列里`globrunqget`找。（需要加锁）；如果还没有，就检查网络轮询器（netpoll），就去`netpoll`里看看有没有因为网络IO就绪的G。（非阻塞模式），依然没有获取到可运行G，则会从别的P偷（steal work），这个偷的过程是随机找一个别的P，从它的LRQ里偷一半的G过来。
+![[images/Pasted image 20251128094433.png]]
+
+
+### ==GMP能不能去掉P层？==
+GMP中的P层理论上可以去掉，但是会带来严重的性能问题
+如果直接编程GM模型，所有M都需要从全局队列中获取goroutine，这就需要全局锁保护。在高并发场景下，大量M争抢同一把锁会造成严重的锁竞争，CPU大部分时间都浪费在等锁上，调度效率急剧下降
+P的存在实现了无锁的本地调度。每个P维护独立的本地队列，M绑定P后可以直接从本地队列取G执行，大部分情况下都不需要全局锁。只有本地队列空了才去偷取，这大大减少了锁竞争
+
+### P和M在什么时候会被创建
+- P的创建时机：P在调度器初始化时一次性创建。
+- M的创建实际：M采用按需创建策略。初始只有m0存在，当出现以下情况时会创建新的M：
+	- 所有现有M都在执行阻塞的系统调用，但还有可运行的goroutine需要执行
+	- 通过`startm()`函数发现没有空闲M可以绑定P执行goroutine
+	- M的数量受`GOMAXTHREADS`限制，默认10000个
+- 创建流程：新M通过`newm()`函数创建，它会调用`newosproc()`创建新的系统线程，并为这个M分配独立的g0。创建完成后，新M会进入`mstart()`开始调度循环。
+
+### m0是什么，有什么用
+m0是在Go启动时创建的第一个M，m0对应程序启动时的主系统线程，它在Go程序的整个生命周期中都存在。与其他通过`runtime.newm()`动态创建的M不同，m0是在程序初始化阶段静态分配的，有专门的全局变量存储。
+m0主要负责执行Go程序的启动流程，包括调度器初始化、内存管理器初始化、垃圾回收器设置等。它会创建并运行第一个用户goroutine来执行`main.main`函数。在程序运行期间，m0也参与正常的goroutine调度，和其他M没有本质区别。m0在程序退出时还负责处理清理工作，比如等待其他goroutine结束、执行defer函数等
+![[images/Pasted image 20251128095634.png]]
+
+## 内存管理
+### 内存管理模型
+![[images/Pasted image 20251205103402.png]]
+
+
+### ==Go语言是如何分配内存的==
+Go语言的内存分配采用了TCMalloc算法的改进版本，核心是分级分配和本地缓存。
+
+分配器架构：Go内存分配有三个层级：mcache（本地缓存）、mcentral（全局缓存）、mheap（堆管理器）。每个P都有独立的mcache，避免锁竞争；mcentral按对象大小分类管理；mheap负责从操作系统申请大块内存。
+
+对象分类分配：根据对象大小分为三类处理：
+- 微小对象（<16字节）：在mcache的tiny分配器中分配，多个微小对象可以共享一个内存块
+- 小对象（16字节-32字节）：通过size class机制，预定义了67种大小规格，优先从P的mcache对应的mspan中分配，如果mcache没有内存，则从mcentral获取，如果mcentral也没有，则向mheap申请，如果mheap也没有，则从操作系统申请内存
+- 大对象（>32字节）：直接从mheap分配，跨越多个页面
+![[images/Pasted image 20251128100255.png]]
+
+### ==什么情况下会发生内存逃逸==
+内存逃逸是编译器在程序编译时期根据逃逸分析策略，将原本应该分配到栈上的对象分配到堆上的一个过程
+主要逃逸场景：
+- 返回局部变量指针：函数返回内部变量的地址，变量必须逃逸到堆上
+- interface{}类型：传递给interface{}参数的具体类型会逃逸，因为需要运行时类型信息
+- 闭包引用外部变量：被闭包捕获的变量会逃逸到堆上
+- 切片/map动态扩展：当容量超出编译期确定范围时会逃逸
+- 大对象：超过栈大小限制的对象直接分配到堆上
+
+### 内存逃逸有什么影响
+因为堆对象需要垃圾回收机制来释放内存，栈对象会跟随函数结束被编译器回收，所以大量的内存逃逸会给gc带来压力
+
+### ==Go的逃逸分析机制是什么==
+Go编译器在编译阶段进行的一项分析工作，核心目的是决定一个变量应该分配在栈上还是堆上
+编译器会分析代码中变量的作用域和生命周期：
+- 如果一个变量在函数返回后不再被引用，它就分配在栈上（随着函数返回自动回收）
+- 如果一个变量在函数返回后依然被引用（例如返回了指针），它就必须逃逸到堆上（由GC负责回收，开销较大）
+
+### 如何避免内存逃逸
+#### 尽量传值，少传指针
+**原则**：如果对象不大（例如普通的 struct、int、bool），**直接传值（Value Copy）** 比传指针更好。
+如果结构体非常大（比如几 KB），传值的拷贝成本可能会超过 GC 的成本，此时传指针反而是合理的。但对于小对象，坚决传值。
+#### 知道切片Slice的大小，尽量指定Cap
+**原则**：在编译期间无法确定大小的切片，往往会逃逸
+
+#### 避免闭包引用外部变量
+**原则**：闭包引用外部变量时，通常是引用捕获，这会导致被引用的变量逃逸到堆上，因为闭包的生命周期可能比原函数长。
+
+### ==除了避免内存逃逸，还有哪些具体的编程技巧或最佳实践，可以用来减少内存分配和GC压力呢？==
+#### 切片复用（slice reuse）
+这是 Go 中最常用、性价比最高的技巧。不要每次都 make 新的切片，而是重置长度。
+- **原理**：切片的底层是数组。将长度 len 设为 0，但容量 cap 还在，下次 append 时直接复用底层数组，不需要分配内存。
+```Go
+// BAD: 循环中频繁分配
+for {
+    buf := make([]byte, 0, 1024) 
+    buf = append(buf, data...)
+    process(buf)
+}
+
+// GOOD: 复用同一个底层数组
+buf := make([]byte, 0, 1024)
+for {
+    buf = buf[:0] // 关键：重置长度，不释放内存
+    buf = append(buf, data...)
+    process(buf)
+}
+```
+
+#### 对象池`sync.Pool`
+对于高频创建、生命周期较短的大对象（如 Request Context, Buffer, Response对象），sync.Pool 是神器。
+- **效果**：它保存了被释放的对象，下次需要时直接取出，避免了 malloc 和 GC 回收的开销。
+- **注意**：放入 Pool 的对象在取出后通常需要**重置状态**（Reset）。
+```Go
+var bufPool = sync.Pool{
+    New: func() interface{} {
+        return new(bytes.Buffer)
+    },
+}
+
+func logHandler(msg string) {
+    // 从池中获取
+    b := bufPool.Get().(*bytes.Buffer)
+    b.Reset() // 必须重置！否则会有旧数据
+    defer bufPool.Put(b) // 用完放回
+
+    b.WriteString(time.Now().String())
+    b.WriteString(msg)
+    // ...
+}
+```
+
+#### 降低GC扫描压力
+GC 的耗时主要取决于**堆上有多少个指针**，而不是堆有多大。如果一个 10GB 的 map 里面全是 `int`，GC 扫描几乎瞬间完成；但如果里面全是 `*int`，GC 就要一个个去遍历。
+
+##### 使用“无指针”的Map
+如果你在做本地缓存（BigCache 就是用的这个原理）。
+- **技巧**：Map 的 Key 和 Value 尽量不要包含指针（包括 string，因为 string 底层包含指针）。
+- **优化**：用 int / float / array / struct (不含指针) 代替。
+- **黑科技**：如果 Map 的 Key/Value 都不含指针，Go 的 GC 会**直接跳过**扫描该 Map 对象。
+```Go
+// BAD: GC 需要扫描每个 User 对象和 String key
+type User struct {
+    Name string
+    Age  int
+}
+cache := make(map[string]*User)
+
+// GOOD: GC 甚至不看这个 map，扫描耗时为 0
+// 将 string 哈希为 int64，将 struct 序列化或存索引
+cache := make(map[int64]UserStructWithoutPointers)
+```
+
+##### 结构体内存对齐
+通过调整结构体字段的顺序，可以减少内存占用（减少 Padding），从而减少整体堆内存分配量。
+- **原则**：将宽的字段（如 int64, float64）放在前面，窄的字段（bool, byte）放在后面。
+```Go
+// BAD: 占用 24 bytes (在 64位系统)
+type BadStruct struct {
+    Flag    bool  // 1 byte + 7 padding
+    Count   int64 // 8 bytes
+    IsAdmin bool  // 1 byte + 7 padding
+}
+
+// GOOD: 占用 16 bytes
+type GoodStruct struct {
+    Count   int64 // 8 bytes
+    Flag    bool  // 1 byte
+    IsAdmin bool  // 1 byte + 6 padding
+}
+```
+
+#### 陷阱
+##### 慎用`time.After`在循环中
+这是一个经典的内存泄露（或高 GC 压力）场景。
+- **问题**：time.After 会创建一个 timer，只有时间到了才会被 GC 回收。如果你在一个死循环里高频调用它，内存会暴涨。
+```GO
+// BAD: 每次循环都创建一个新 Timer，且不立即释放
+for {
+    select {
+    case <-ch:
+        // do something
+    case <-time.After(3 * time.Second): // 内存杀手
+        // timeout
+    }
+}
+
+// GOOD: 复用 Timer
+timer := time.NewTimer(3 * time.Second)
+for {
+    timer.Reset(3 * time.Second) // 复用
+    select {
+    case <-ch:
+        // ...
+        if !timer.Stop() { // 记得排空 channel
+            <-timer.C
+        }
+    case <-timer.C:
+        // timeout
+    }
+}
+```
+
+
+### ==有哪些代码或数据结构，通过避免内存逃逸可以带来比较明显的优化效果==
+通过优化代码结构避免逃逸，让变量留在栈上（随函数返回自动销毁，无需 GC），是 Go 高性能编程的核心技巧。以下是几个**避免逃逸带来明显优化效果**的场景和数据结构：
+#### 指针 vs 值传递
+这是最常见的误区。很多人习惯在 Go 中“为了效率”全部传指针，认为复制结构体开销大。但实际上，对于**小对象**，传指针反而往往会导致逃逸。
+- **逃逸原因**：如果函数返回一个局部变量的指针，或者将指针传递给接口（如 fmt.Println），编译器为了保证该变量在函数结束后依然可用，必须将其移到堆上。
+- **优化方案**：对于小的结构体（如字段少于 4-5 个的），直接使用**值传递**。虽然有内存拷贝，但避免了 GC，总体通常更快。
+
+#### 接口传参
+Go 的接口（Interface）在底层由两部分组成：类型信息和数据指针。当你将一个具体类型赋值给接口（例如 func(v interface{})）时，通常会发生逃逸。
+- **逃逸原因**：编译器很难证明接口持有的数据在函数外不会被使用，且接口通常需要存储数据的类型信息，这往往导致数据被“装箱”（Boxed）到堆上。
+- **经典场景**：fmt.Println、log.Printf、json.Marshal。
+- **优化方案**：
+    - 在热点路径（Hot Path）中，尽量避免使用接受 interface{} 的函数。
+    - 使用专门的库替代通用库（例如用 zap 的强类型字段替代 logrus 的接口字段）。
+    - 对于简单的转换，使用 strconv 等强类型函数。
+```Go
+// BAD: i 逃逸到堆上
+func logBad(i int) {
+    fmt.Println(i) // fmt 接收 interface{}，导致 i 逃逸
+}
+
+// GOOD: 不逃逸
+func logGood(i int) {
+    // 假设这是我们自己实现的 buffer 写入，直接操作 int
+    // 或者使用 strconv 转换，虽然 string 可能逃逸，但 int 本身处理更高效
+    _ = strconv.Itoa(i) 
+}
+```
+#### 固定大小数组 vs 切片
+切片（Slice）的底层引用了一个数组。如果切片的容量（Capacity）在编译期未知，或者过大，它的底层数组就会分配在堆上。
+- **逃逸原因**：`make([]int, n)`，如果 n 是变量，编译器无法在编译期确定栈帧大小，只能分配到堆。
+- **优化方案**：如果缓冲区大小有一个合理的上限，使用**固定大小的数组**（Array）作为局部缓存，或者用数组做切片的“后端存储”。
+
+#### 闭包捕获变量
+在闭包中引用外部变量时，如果该变量在闭包外部被修改，或者闭包本身被返回/传递出去，被捕获的变量往往会逃逸。
+- **逃逸原因**：编译器无法确定被捕获变量的生命周期是否超过了原函数。
+- **优化方案**：尽量通过**参数传递**给匿名函数，而不是让它直接捕获外部变量。
+```Go
+// BAD: x 逃逸
+func closureBad() func() int {
+    x := 0
+    return func() int {
+        x++ // 捕获了 x，x 必须在堆上，否则外层函数结束后 x 就没了
+        return x
+    }
+}
+
+// GOOD: 避免闭包逃逸（如果场景允许）
+// 将状态放到结构体中，或者通过参数传递
+```
+
+#### 利用`sync.Pool`
+这虽然不是“避免逃逸”（对象依然在堆上），但它是解决频繁堆分配的终极方案。
+- **原理**：当对象不得不逃逸时（比如对象很大，或者生命周期很长），使用 sync.Pool 复用对象，避免反复的 malloc 和 GC。
+- **场景**：HTTP Context、Request 对象、大块的 `[]byte` 缓冲区。
+
+### channel是分配在栈上，还是堆上
+channel是分配在堆上，channel被设计用来实现协程间通信，其作用域和生命周期不可能仅限于某个函数内部，所以一般情况下golang直接将其分配到堆上
+
+### ==Go语言在什么情况下会发生内存泄漏==
+以下是一些内存泄漏的常见场景：
+- goroutine泄漏：这是最常见的泄漏场景。goroutine没有正常退出会一直占用内存，比如从channel读取数据但channel永远不会有数据写入，或者死循环没有退出条件。
+- channel泄漏：未关闭的channel和等待channel的goroutine会相互持有引用。比如生产者已经结束但没有关闭channel，消费者goroutine会一直阻塞等待，造成内存无法回收
+- slice引用大数组：但slice引用一个大数组的小部分时，整个底层数组都无法被GC回收。解决办法就是使用copy创建新的slice
+- map元素过多：map中删除元素只是标记删除，底层bucket不会缩减。如果map曾经很大后来运输减少，内存占用仍然会很高
+- 定时器未停止：`time.After`或`time.NewTimer`创建的定时器如果不手动停止，会在heap中持续存在
+- 循环引用：虽然Go的GC能处理循环引用，但在某些复杂场景下仍可能出现问题
+
+### ==goroutine泄漏==
+goroutine泄漏是指一个Goroutine启动后，因为某种原因（通常是阻塞）永远无法退出，导致它占用的栈内存（初始2KB，可动态增长）和它持有的堆对象无法被垃圾回收
+随着时间推移，泄漏的协程越来越多，最终会导致内存耗尽（OOM）甚至程序崩溃
+
+绝大多数泄漏都与channel操作阻塞或同步原语误用有关
+- 发送阻塞：这是最典型的场景，父协程启动一个子协程去发送数据，但父协程因为某些原因提前退出或不再接收数据，导致子协程一直卡在`ch <- data`上
+```Go
+func query() int {
+    ch := make(chan int)
+    go func() {
+        // 模拟耗时操作
+        time.Sleep(time.Second) 
+        // 💀 泄漏点：主函数可能已经返回了，这里没人接收，导致永久阻塞
+        ch <- 100 
+    }()
+    // 这里如果加入超时逻辑，超时后 return，上面的 goroutine 就会泄漏
+    return <-ch
+}
+```
+
+- 接收阻塞：子协程在一个channel上等待数据，但发送方既没有发送数据，也没有关闭channel，导致子协程无限等待
+```Go
+func leak() {
+    ch := make(chan int)
+    go func() {
+        // 💀 泄漏点：如果外部不再往 ch 写数据，且不 close(ch)，这里会一直阻塞
+        val := <-ch 
+        fmt.Println(val)
+    }()
+}
+```
+
+- Nil channel阻塞：向一个nil的channel发送或接收消息，都会导致永久堵塞
+```Go
+func leak() {
+    var ch chan int // 默认为 nil
+    go func() {
+        // 💀 永远阻塞
+        <-ch 
+    }()
+}
+```
+
+- `time.Ticker`未停止：使用`time.NewTicker`创建定时器，如果不显式调用`Stop()`，底层的runtime timer可能不会被回收，如果配合`for range ticker.C`且没有正确的退出条件，协程就会泄漏
+```Go
+func leak() {
+    ticker := time.NewTicker(time.Second)
+    go func() {
+        for range ticker.C {
+            // 如果没有退出逻辑，这个协程永远在跑
+            // 且如果外部忘记 ticker.Stop()，也会造成资源浪费
+        }
+    }()
+}
+```  
+
+- 互斥锁死锁：虽然死锁通常会导致程序崩溃（fatal error），但在某些局部作用域下的 sync.Mutex 锁竞争如果导致 Goroutine 挂起且无法被唤醒，本质上也是一种泄漏。
+
+### ==如何避免协程泄漏==
+当你启动一个goroutine时，必须明确知道它将如何退出
+- 使用`context.Context`控制退出：父协程通过context通知子协程退出
+```Go
+func worker(ctx context.Context, ch chan int) {
+    go func() {
+        // 模拟做任务
+        select {
+        case ch <- 1: // 尝试发送
+        case <-ctx.Done(): // ✅ 兜底：如果 context 取消，直接退出
+            return 
+        }
+    }()
+}
+```
+- 使用select和超时机制：不要直接进行阻塞式I/O或channel操作，加上`time.After`或`default`分支
+```Go
+func send(ch chan int) {
+    select {
+    case ch <- 1:
+        // 发送成功
+    case <-time.After(time.Second):
+        // ✅ 超时退出，避免死等
+        fmt.Println("timeout, exiting")
+    }
+}
+```
+- 确保生产者关闭channel：遵循“谁生产，谁关闭”的原则。接收方通过`val, ok := <-ch`判断channel是否关闭，从而退出循环
+```Go
+// 生产者
+go func() {
+    for i := 0; i < 10; i++ {
+        ch <- i
+    }
+    close(ch) // ✅ 明确关闭
+}()
+
+// 消费者
+go func() {
+    for val := range ch { // ✅ channel 关闭后，range 会自动结束退出
+        fmt.Println(val)
+    }
+}()
+```
+
+
+### Go语言发生了内存泄漏如何定位和优化
+定位工具：
+- pprof：最重要的工具，通过`go tool pprof http://localhost:port/dabug/pprof/heap`分析堆内存分布，`go tool pprof http://localhost:port/debug/pprof/goroutine`分析goroutine泄漏
+- trace工具：`go tool trace`可以看到goroutine的生命周期和阻塞情况
+- runtime统计：通过`runtime.ReadMemStats()`监控内存使用趋势，`runtime.NumGoroutine()`监控协程数量
+定位方法：通常先看内存增长曲线，如果内存持续上涨不回收，就用pprof分析哪个函数分配内存最多。如果是goroutine泄漏，会看到goroutine数量异常增长，然后分析这些goroutine阻塞在哪里
+常见优化手段：
+- goroutine泄漏：使用context设置超时，确保goroutine有退出机制，避免无限阻塞
+- channel泄漏：及时关闭channel，使用select+default避免阻塞
+- slice引用优化：对大数组的小slice使用copy创建独立副本
+- 定时器清理：手动调用`timer.Stop()`释放资源
+
+## GC
+### ==栈内存如何回收==
+#### 函数返回时的回收
+这是最基础的栈内存回收方式，完全通过移动栈指针来完成
+- 当一个函数执行完毕返回时，Go只需要将栈指针（SP）向下（或向上，取决于栈增长方向）移动，恢复到调用该函数之前的状态
+- 这一步并没有真正“清空”内存或把内存归还给操作系统，而是**逻辑上的释放**。之前该函数占用的内存空间现在被标记为“可用”，下一个被调用的函数会直接覆盖这块内存。
+
+#### 栈的缩容
+Go 的 Goroutine 栈是**动态扩容**的（初始通常为 2KB）。如果一个 Goroutine 曾经因为深层递归使用了大量栈空间（比如扩容到了 1MB），但后来递归结束了，只用了很少的空间，为了避免内存浪费，Go 运行时会进行**缩容**。
+- 在GC的过程中进行扫描时
+- 触发条件：
+	- 当前栈的大小大于初始大小（通常是2KB）
+	- 当前实际使用的空间小于总分配空间的1/4
+- 执行过程：
+	- 运行时会分配一个新的、大小为原来1/2的内存块
+	- 将旧栈的有用数据复制到新栈总
+	- 修改指向栈中数据的指针（Go运行时需要知道哪些是指针，以便调整指向新地址）
+	- 回收旧栈：将旧的、较大的内存块归还给 Go 的内存分配（mcache/mcentral/mheap），供其他地方使用。
+
+#### Goroutine销毁时的回收
+当一个goroutine执行完main函数或退出时，整个栈内存会被完全回收
+- 机制：goroutine结束运行
+- Go运行时会将该goroutine绑定的栈内存块整体释放
+- 这些内存块会被放回**对象池**（比如 mcache 中的 span 列表）或者全局堆中，等待被新的 Goroutine 复用。这减少了向操作系统申请内存的系统调用开销。
+
+### 常见的GC实现方式有哪些
+所有的GC算法其存在形式可以归结为追踪（tracing）GC和引用计数（reference counting）这两种形式的混合运用
+
+任何一种GC算法一般要做两件基本事情：
+- 找到无用的对象
+- 回收将无用对象占用的内存空间，使该空间可被程序再次使用
+
+目前比较常见的实现方式有：
+- 标记清扫：从根对象出发，将确定存活的对象进行标记，并清扫可以回收的对象
+- 标记整理：为了解决内存碎片问题而提出，在标记过程中，将对象尽可能整理到一块连续的内存上
+- 增量式：将标记与清扫的过程分批执行，每次执行很小的部分，从而增量的推进垃圾回收，达到近似实时、几乎无停顿的目的
+- 增量整理：在增量式的基础上，增加对对象的整理过程
+- 分代式：将对象根据存活时间的长短进行分类，存活时间小于某个值的为年轻代，存活时间大于某个值的为老年代，永远不会参与回收的对象为永久代。并根据分代假设（如果一个对象存活时间不长则倾向于被回收，如果一个对象已经存活很长时间则倾向于存活更长时间）对对象进行回收
+- 引用计数：根据对象自身的引用计数来回收，当引用计数归零时立即回收
+#### 引用计数法（Reference Counting Colletor）
+给每个对象添加一个引用计数器，如果被引用则计数器加1，如果引用该对象的对象被销毁，计数器减1，当计数器为0时，代表该对象没有被引用那就需要回收了
+
+如果两个对象相互引用：A引用了B，B又引用了A，那就无法释放了
+
+优点：引用计数收集器可以很快的执行，对象可以很快的被回收，不会出现内存耗尽或达到某个阀值时才回收,对程序需要不被长时间打断的实时环境比较有利
+缺点：不能检测出循环引用，而且实时维护引用计数，有也一定的代价,比如:父对象有一个对子对象的引用，子对象反过来引用父对象，这样，他们的引用计数永远不可能为0
+
+#### 根搜索算法
+设立若干种根对象，根对象的子对象也是存活的，当任何一个根对象到某一个对象都无法可达时，那么这个对象就是可回收的
+![[images/Pasted image 20251202152932.png]]
+如上图右侧白色部分则为根无法到达，从根变量开始遍历所有引用的对象，引用的对象标记为“被引用”，没有被标记的会被判断为垃圾进行回收
+
+在Go语言中，可以当作GC roots的对象有：
+- 全局变量
+- 各个G stack上的变量等
+
+优点：解决了引用计数的缺点
+缺点：需要STW(Stop The World)，==STW是gc的最大性能问题==，对于gc而言，需要暂时停掉程序运行,也就是暂时停止程序的所有的内存变化，即停止所有的goroutine，等待gc结束之后才恢复
+STW的定义:为了避免程序本身运行给GC标记和清除带来不一致性，导致误删,为了保证一致性，golang会停止除了GC模块程序之外的程序运行，这个过程被称为 STW,在这个过程中整个用户代码被停止或者放缓执行， STW越长，对用户代码造成的影响（例如延迟）就越大，早期 Go 对垃圾回收器的实现中 STW的停顿时间甚至是达到s级，对时间敏感的实时通信等应用程序会造成巨大的影响
+
+
+####  复制算法（Copying）
+![[images/Pasted image 20251202153622.png]]
+复制算法将内存划分为两个区间，在任意时间点，所有动态分配的对象都只能分配在其中一个区间（称为活动区间），而另外一个区间（称为空闲区间）则是空闲的.当有效内存空间耗尽时，虚拟机将暂停程序运行，开启复制算法GC线程,接下来GC线程会将活动区间内的存活对象，全部复制到空闲区间，且严格按照内存地址依次排列，与此同时，GC线程将更新存活对象的内存引用地址指向新的内存地址,复制算法要想使用，最起码对象的存活率要非常低才行，而且最重要的是，必须要克服50%内存的浪费
+![[images/Pasted image 20251202154048.png]]
+当From空间被占满时，GC将活动的对象全部复制到To空间,当复制完成后，该算法会将From空间和To空间互换，GC结束,From 空间和To 空间大小必须一致,这是为了保证能把From 空间中的所有活动对象都收纳到To 空间里
+
+优缺点：
+- 优秀的吞吐量，可实现高速分配，不会发生碎片化
+- 但是复制算法需要把堆进行二等分，只有一半的堆能被使用,造成堆的浪费,还有复制算法在复制某个对象时要递归复制它子对象，这里会带来额外的负担，有栈溢出的可能
+
+#### 标记-清除算法
+标记-清除算法采用从根对象进行扫描，对存活的对象标记，标记完毕后，再扫描整个空间中未被标记的对象，进行回收：
+![[images/Pasted image 20251202204206.png]]
+标记-清除算法不需要进行对象的移动，并且仅对不存活的对象进行处理，在存活对象比较多的情况下极为高效，但由于标记-清除法直接回收不存活的对象，因此会造成内存碎片
+
+标记- 清除算法可以由**标记阶段**和**清除阶段**构成,**`标记阶段`** 是把所有活动对象都做上标记的阶段,**`清除阶段`** 是把那些没有标记的对象，也就是非活动对象回收的阶段,通过这两个阶段，就可以令不能利用的内存空间重新得到利用
+##### 标记阶段
+![[images/Pasted image 20251202204411.png]]
+![[images/Pasted image 20251202204418.png]]
+
+### Go语言的GC使用的是什么
+Go的GC使用的是无分代（对象没有代际之分）、不整理（回收过程中不对对象进行移动与整理）、并发（与用户代码并发执行）的三色标记清扫算法
+
+### ==三色标记法==
+三色定义：
+- 白色：未被访问的对象，垃圾回收结束后白色对象会被清理
+- 灰色：已被访问但其引用对象还未完全扫描的对象，是待处理队列
+- 黑色：已被访问且其所有引用对象都已扫描完成的对象，确认存活
+
+#### 四个阶段
+- Mark Prepare - STW: 做标记阶段的准备工作，需要停止所有正在运行的goroutine(即STW),标记根对象,启用内存屏障,内存屏障有点像内存读写钩子，它用于在后续并发标记的过程中，维护三色标记的完备性(三色不变性)，这个过程通常很快，大概在10-30微秒
+- Marking - Concurrent:标记阶段会将大概25%(gcBackgroundUtilization)的P用于标记对象，逐个扫描所有G的堆栈，执行三色标记，在这个过程中，所有新分配的对象都是黑色，被扫描的G会被暂停,扫描完成后恢复，这部分工作叫后台标记(gcBgMarkWorker),这会降低系统大概25%的吞吐量，比如MAXPROCS=6，那么GC P期望使用率为6*0.25=1.5，这150%P会通过专职(Dedicated)/兼职(Fractional)/懒散(Idle) 三种工作模式的Worker共同来完成。这还没完，为了保证在Marking过程中，其它G分配堆内存太快，导致Mark跟不上Allocate的速度，还需要其它G配合做一部分标记的工作，这部分工作叫辅助标记(mutator assists),在Marking期间，每次G分配内存都会更新它的”负债指数”(gcAssistBytes)，分配得越快，gcAssistBytes越大，这个指数乘以全局的”负载汇率”(assistWorkPerByte)，就得到这个G需要帮忙Marking的内存大小(这个计算过程叫revise)，也就是它在本次分配的mutator assists工作量(gcAssistAlloc)。
+- Mark Termination - STW: 标记阶段的最后工作是Mark Termination，关闭内存屏障，停止后台标记以及辅助标记，做一些清理工作，整个过程也需要STW，大概需要60-90微秒,在此之后，所有的P都能继续为应用程序G服务了
+- Sweeping - Concurrent :在标记工作完成之后，剩下的就是清理过程了，清理过程的本质是将没有被使用的内存块整理回收给上一个内存管理层级(mcache -> mcentral -> mheap -> OS)，清理回收的开销被平摊到应用程序的每次内存分配操作中，直到所有内存都Sweeping完成,当然每个层级不会全部将待清理内存都归还给上一级，避免下次分配再申请的开销，比如Go1.12对mheap归还OS内存做了优化，使用NADV_FREE延迟归还内存
+
+而在Marking - Concurrent 阶段，有三个问题:
+- GC 协程和业务协程是并行运行的,大概会占用 25% 的CPU，使得程序的吞吐量下降
+- 如果业务goroutine 分配堆内存太快，导致 Mark(标记) 跟不上Allocate(分配) 的速度，那么业务goroutine会被招募去做协助标记，暂停对业务逻辑的执行，这会影响到服务处理请求的耗时
+- Go GC在稳态场景下可以很好的工作,但是在瞬态场景下,如定时的缓存失效，定时的流量脉冲，GC 影响会急剧上升
+在Mark Prepare、Mark Termination - STW 阶段，这两个阶段虽然按照官方说法时间会很短，但是在实际的线上服务中，有时会在 trace 图中观测到长达十几 ms 的停顿，原因可能为：OS 线程在做内存申请的时候触发内存整理被“卡住”，Go Runtime 无法抢占处于这种情况的 goroutine ，进而阻塞 STW 完成
+#### ==标记流程==
+GC开始时所有对象都是白色的，从GC Root（全局变量、栈变量等）开始将直接可达对象标记为灰色。然后不断从灰色队列中取出对象，扫描其引用的对象：如果引用对象是白色就标记为灰色，当前对象所有引用扫描完成后标记为黑色。重复这个过程直到灰色队列为空。
+![[images/Pasted image 20251128183046.png]]
+![[images/Pasted image 20251128183051.png]]
+![[images/Pasted image 20251128183057.png]]
+![[images/Pasted image 20251128183102.png]]
+![[images/Pasted image 20251128183107.png]]
+![[images/Pasted image 20251128183113.png]]
+![[images/Pasted image 20251128183123.png]]
+
+#### ==三色标记法存在的问题==
+- 多标-浮动垃圾问题：假设 E 已经被标记过了（变成灰色了），此时 D 和 E 断开了引用，按理来说对象 E/F/G 应该被回收的，但是因为 E 已经变为灰色了，其仍会被当作存活对象继续遍历下去,最终的结果是：这部分对象仍会被标记为存活，即本轮 GC 不会回收这部分内存。这部分本应该回收但是没有回收到的内存，被称之为“浮动垃圾”。![[images/Pasted image 20251128183331.png]]
+- 漏标-悬挂指针问题：当 GC 线程已经遍历到 E 变成灰色，D变成黑色时，灰色 E 断开引用白色 G ，黑色 D 引用了白色 G,此时切回 GC 线程继续跑，因为 E 已经没有对 G 的引用了，所以不会将 G 放到灰色集合,尽管因为 D 重新引用了 G，但因为 D 已经是黑色了，不会再重新做遍历处理。最终结果就是：G会一直停留在白色集合中，最后被当作垃圾进行清除。这直接影响到了应用程序的正确性，这也是Go需要在GC时解决的问题![[images/Pasted image 20251128183601.png]]
+
+#### 屏障机制
+为了解决上面的问题，引入屏障技术来保障数据的一致性:为了在GC过程中保证数据的安全，在开始三色标记之前就会加上STW，在扫描确定黑白对象之后再放开STW,但是很明显这样的GC扫描的性能是很低的,STW的过程有明显的资源浪费，对所有的用户程序都有很大影响,因为整个GC流程会进行两次STW(Stop The World), 第一次是Mark阶段的开始, 第二次是Mark Termination阶段,为了解决标记-清除(mark and sweep)算法中的卡顿(stw，stop the world)问题,尽可能的提高GC效率，减少STW时间,这里引入了屏障机制(内存屏障)来解决,它能使CPU或编译器对在该屏障指令之前和之后发出的内存操作强制执行排序约束，在内存屏障前执行的操作一定会先于内存屏障后执行的操作
+- 第一次STW会准备根对象的扫描, 启动写屏障(Write Barrier)和辅助GC(mutator assist).
+- 第二次STW会重新扫描部分根对象, 禁用写屏障(Write Barrier)和辅助GC(mutator assist)
+
+
+### Go中GC的根对象到底是什么
+根对象在垃圾回收的术语中又叫做根集合，它是垃圾回收器在标记过程时最先检查的对象，包括：
+- 全局变量：程序在编译期就能确定的哪些存在于程序整个生命周期的变量
+- 执行栈：每个goroutine都包含自己的执行栈，这些执行栈包含栈上的变量及指向分配的堆内存区块的指针
+- 寄存器：寄存器的值可能表示一个指针，参与计算的这些指针可能指向某些赋值器分配的堆内存区块
+**这里要注意的是: 屏障技术是不在** **栈** **上应用的，因为要保证栈的运行效率** 
+
+##### 强-弱三色不变性
+- 强三色不变性：黑色不能引用白色对象
+![[images/Pasted image 20251202205138.png]]
+
+- 弱三色不变性：被黑色引用的白色对象都处于灰色保护
+![[images/Pasted image 20251202205218.png]]
+弱三色不变式强调，黑色对象可以引用白色对象，但是这个白色对象必须存在其他灰色对象对它的引用，或者可达它的链路上游存在灰色对象,这样实则是黑色对象引用白色对象，白色对象处于一个危险被删除的状态,但是上游灰色对象的引用，可以保护该白色对象，使其安全
+
+##### 插入屏障
+插入屏障只对堆上的内存分配起作用：
+在A对象**引用B**对象的时候，B对象被标记为灰色,(将B挂在A下游，B必须被标记为灰色),遵循**三色不变式** (不存在黑色对象引用白色对象的情况了， 因为白色会强制变成灰色),但有一个不足之处：结束时需要STW来重新扫描栈，大约需要10~100ms,下面可以通过几张流程图来介绍
+![[images/Pasted image 20251202205333.png]]
+![[images/Pasted image 20251202205345.png]]
+![[images/Pasted image 20251202205354.png]]
+![[images/Pasted image 20251202205417.png]]
+![[images/Pasted image 20251202205452.png]]
+![[images/Pasted image 20251202205519.png]]
+但是如果栈不添加,当全部三色标记扫描之后,栈上有可能依然存在白色对象被引用的情况(如上图的对象9). 所以要对栈重新进行三色标记扫描, 但这次为了对象不丢失, 要对本次标记扫描启动STW暂停. 直到栈空间的三色标记结束.
+![[images/Pasted image 20251202205541.png]]
+![[images/Pasted image 20251202205609.png]]
+![[images/Pasted image 20251202205614.png]]
+最后将栈和堆空间 扫描剩余的全部 白色节点清除. 这次STW大约的时间在10~100ms间
+![[images/Pasted image 20251202205625.png]]
+
+##### 删除屏障
+删除屏障适用于栈和堆，在删除屏障机制下删除一个节点该节点会被置成灰色，后续会继续扫描该灰色对象的子对象,该方法就是**精准度不够高,**一个对象即使被删除了最后一个指向它的指针也依旧可以活过这一轮，在下一轮GC中被清理掉
+
+被删除的对象，如果自身为灰色或者白色，那么被标记为灰色,遵循**弱三色不变式** (保护灰色对象到白色对象的路径不会断),下面可以通过几张流程图来介绍
+![[images/Pasted image 20251202205722.png]]
+![[images/Pasted image 20251202205730.png]]
+![[images/Pasted image 20251202205741.png]]
+![[images/Pasted image 20251202205754.png]]
+![[images/Pasted image 20251202205810.png]]
+![[images/Pasted image 20251202205824.png]]
+![[images/Pasted image 20251202205829.png]]
+这种方式的回收精度低，一个对象即使被删除了最后一个指向它的指针也依旧可以活过这一轮，在下一轮GC中被清理掉
+
+#### ==混合写屏障机制==
+目的是解决屏蔽机制（插入屏障和删除屏障）的短板
+- 插入(**写**)屏障：结束时需要STW来重新扫描栈，标记栈上引用的白色对象的存活
+- 删除(**写**)屏障：回收精度低，GC开始时STW扫描堆栈来记录初始快照，这个过程会保护开始时刻的所有存活对象
+
+混合写屏障的基本思想是：
+正在被覆盖的对象进行着色，且如果当前栈未扫描完成， 则同样对指针进行着色,同时，在GC的过程中所有新分配的对象都会立刻变为黑色,在垃圾收集的标记阶段，将新建的对象标记成黑色，防止新分配的栈内存和堆内存中的对象被错误地回收
+
+Go V1.8版本引入了混合写屏障机制（hybrid write barrier），避免了对栈re-scan的过程，极大的减少了STW的时间,结合了两者的优点,具体步骤如下:
+- 1.GC开始将栈上的对象**全部扫描并标记为黑色**(之后不再进行第二次重复扫描，无需STW)，
+- 2.GC期间，任何在栈上创建的新对象，**均为黑色**
+- 3.被删除的对象标记为**灰色**
+- 4.被添加的对象标记为**灰色**
+
+混合写屏障机制满足变形的弱三色不变式,可以大幅压缩第二次STW的时间
+
+这里需要注意:屏障技术是不在栈上应用的，因为要保证栈的运行效率，
+主要原因如下：
+**​​栈是线程私有的，无需同步​​**
+- 栈内存​​ 是每个 Goroutine（Go 的轻量级线程）​​私有的​​，不同 Goroutine 之间不会共享栈内存。
+- 由于栈的访问​​不涉及并发竞争​​（即没有多个线程同时读写同一块栈内存），因此不需要内存屏障来保证可见性和顺序性。
+- 而​​堆内存​​ 是共享的，多个 Goroutine 可能同时访问，因此需要屏障来确保正确的内存可见性。​​​​​​​
+**​​栈的操作必须高效**​​
+- 栈的操作（如函数调用、局部变量访问）是高频且性能敏感的​​：
+	- 函数调用时，参数传递、返回地址保存、局部变量分配都在栈上进行。
+	- 如果引入屏障，会增加额外的 CPU 指令，降低栈操作的效率。
+- 堆的操作（如对象分配、GC）可以容忍一定的开销​​：
+	- 堆上的内存分配和回收通常比栈慢，因此引入屏障的代价相对可以接受
+**编译器优化依赖于栈的确定性​​**
+- ​​栈的生命周期是严格 LIFO（后进先出）​​，编译器可以做出更强的优化假设：
+- 例如，局部变量的生命周期在函数返回时自动结束，无需额外的同步机制。
+- 堆上的对象生命周期不确定​​，可能被多个 Goroutine 引用，因此需要屏障来协调并发访问
+**Go 的逃逸分析（Escape Analysis）** ​​
+• Go 编译器会进行​​逃逸分析​​，判断变量是否“逃逸”到堆上：
+- 如果一个变量只在函数内部使用，它会被分配在​​栈​​上（无需同步）。
+- 如果变量可能被其他 Goroutine 访问，它会被分配在​​堆​​上（需要屏障）。
+因此，​​栈上的变量天然避免了并发问题​​，无需屏障
+
+![[images/Pasted image 20251202210415.png]]
+![[images/Pasted image 20251202210422.png]]
+
+##### 具体场景分析
+###### 对象被一个堆对象删除引用，成为栈对象的下游
+![[images/Pasted image 20251202210452.png]]
+![[images/Pasted image 20251202210508.png]]
+
+###### **对象被一个栈对象删除引用，成为另一个栈对象的下游**
+![[images/Pasted image 20251202210552.png]]
+![[images/Pasted image 20251202210610.png]]
+![[images/Pasted image 20251202210630.png]]
+
+######  **对象被一个堆对象删除引用，成为另一个堆对象的下游**
+![[images/Pasted image 20251202210807.png]]
+![[images/Pasted image 20251202210831.png]]
+![[images/Pasted image 20251202210857.png]]
+
+###### **对象从一个栈对象删除引用，成为另一个堆对象的下游**
+![[images/Pasted image 20251202210936.png]]
+![[images/Pasted image 20251202210950.png]]
+![[images/Pasted image 20251202211007.png]]
+Golang中的混合写屏障满足 **`弱三色不变式`** ，结合了删除写屏障和插入写屏障的优点，只需要在开始时并发扫描各个goroutine的栈，使其变黑并一直保持，这个过程不需要STW，而标记结束后，因为栈在扫描后始终是黑色的，也无需再进行re-scan操作了，**减少了STW的时间**
+
+### 三色标记法的具体流程
+三色标记法的具体工作流程是这样的。一开始，所有对象都被认为是白色的。GC开始后，首先会有一个很短的STW阶段，用来扫描“根对象”，比如各个Goroutine栈上的变量、全局变量等，把这些根对象直接引用的对象标记为灰色。然后STW结束，进入并发标记阶段。GC后台的标记线程会和我们的程序一起运行，它不断地从灰色对象队列里取出对象，扫描这个对象内部引用的其他对象。如果引用的对象是白色的，就把它变成灰色加入队列；扫描完当前对象后，就把它涂黑。这个过程一直持续到灰色队列为空。这时候，所有存活的对象都变成了黑色，而剩下的白色对象就是没有任何引用链可达的垃圾了。最后的清除阶段，GC会把这些白色对象占用的内存回收回来，以便后续分配使用。为了保证并发标记时，用户程序新创建的对象或修改的引用能被正确追踪，Go还用了写屏障技术来记录这些引用变化。
+
+### ==插入写屏障和删除写屏障，能结合一个具体的例子，说说它们是如何协同工作来保证并发标记的正确性的吗？==
+#### 打卡项目
+以获取活动详情为例，因为活动详情中会返回目前已经完成的成员列表，和未完成的成员列表。假如当发生GC时，我们在并发地将用户从未签到列表转移到已签到列表
+1. **插入写屏障（保护新引用）**：
+    - 当你执行` detail.CheckedMembers[0] `时，插入屏障会立即把 `UserA` 标记为**灰色**。
+    - **作用**：确保新被引用的对象 `UserA` 能被 GC 看到，防止它因为被挂在一个已经扫描过的黑色对象（`detail`）下而被漏扫。
+2. **删除写屏障（保护旧引用）**：
+    - 当你执行 `detail.UnCheckedMembers[0] = nil`（移除旧引用）时，删除屏障会把原本指向的 `UserA` 标记为**灰色**。
+    - **作用**：确保即使 `UserA` 的旧路径断了，它在本轮 GC 中依然被视为存活（快照机制），防止因为引用被删除而导致对象被误回收。
+#### IM项目
+在IM项目中，插入写屏障的作用非常重要。因为我的websocket服务端中，会维护一个连接map，假如现在在GC过程中，并且已经将Server对象GC扫描完了，标记为黑色，然后其中的连接对象都标记为灰色，在此时，有新的连接请求进来了，创建了一个新的连接，这个连接的引用是会连接到Server对象上的，假如没有插入写屏障，此时，就是一个黑色对象引用一个白色对象，会导致在后续的标记过程中，始终为白色，最后被当作垃圾进行回收，产生非常严重的后果。如果有写屏障的保护，就可以在插入后，虽然仍然会是插入到Server对象上，但是会直接将新插入的连接对象标记为灰色，这样的话就可以保证在后续的标记过程中，可以使得这个对象不会被意外清理。
+
+其次，删除写屏障的作用也非常重要，就比如说，现在在GC过程中，还是Server对象已经被标记为黑色了，而此时可能连接对象没有被扫描到，还是白色，此时客户在发送了一条消息之后就退出了，此时会服务端会删除这个客户端的连接，但是此时可能刚发送的消息还在处理过程中，还没有放入Kafka队列中，还是在服务端的消息处理过程中，假如说，没有删除写屏障，就会导致连接对象后续会被GC清理，同时相关的未处理完成的消息也会被一起清理，导致数据的丢失，这是不能接受的。但是假如有删除写屏障，就可以保证在本轮的GC中，这个连接对象还是会被保留下来，用于消息的处理，在处理完成后，就关闭，等待下一轮的GC再将这个连接对象清理。
+
+### ==在Go的三色标记法并发标记过程中，为什么需要写屏障？它具体解决了什么问题呢？==
+#### 为什么需要写屏障
+Go 的 GC 是**并发**的，意味着 GC 标记线程和用户程序（Mutator）是同时运行的。
+- GC 正在遍历图，给对象染色（白 -> 灰 -> 黑）。
+- 与此同时，用户程序可能在修改内存中的指针关系（比如 A.ptr = C）。
+
+如果没有写屏障，用户程序可能会破坏 GC 的标记逻辑，造成**悬挂指针（Dangling Pointer）**，即：**GC 以为某个对象是垃圾把它回收了，但实际上用户程序还持有该对象的引用。**
+
+#### 为什么需要删除写屏障
+假设 GC 正在运行，目前的标记状态如下（三色标记）：
+- **A (黑)**：扫描完毕的对象。
+- **B (灰)**：正在扫描队列中的对象。
+- **C (白)**：还未被扫描的对象。
+
+**初始关系**：B -> C (B 引用了 C)。因为 B 是灰色，GC 等会儿会通过 B 找到 C，所以 C 是安全的。
+
+现在，用户代码（Mutator）并发执行了以下两步操作（相当于把 C 从 B 转移到了 A）：
+1. **赋值（移动）**：A.ptr = C
+    - 此时 A（黑色）引用了 C（白色）。
+    - 注意：因为 A 已经是黑色，GC 认为 A 已经扫完了，不会再回头看 A。所以 GC 此刻不知道 A 拿到了 C 的引用。
+2. **删除（切断旧路）**：B.ptr = nil
+    - 用户把 B 对 C 的引用删除了。
+
+此时如果没有删除写屏障，会导致
+1. GC 继续扫描 B（灰色）。
+2. GC 发现 B 没有任何引用了（因为 B.ptr 刚才被置为 nil 了）。
+3. B 扫描结束，变黑。
+4. GC 检查还有没有灰色对象？没了。
+5. **GC 结算**：此时 C 依然是**白色**。
+6. **回收**：GC 认为 C 是垃圾，把 C 回收掉。
+但是此时A还引用着C，当你此时访问 A.ptr 时，程序直接崩溃（Panic），因为内存已经被回收了。
+
+假如有删除写屏障
+为了防止上述情况，删除写屏障（Yuasa Barrier）的逻辑是：
+
+> **“虽然你现在删除了 B 指向 C 的引用，但在 GC 开始的那一刻，C 是活着的。为了保险起见，我强制让 C 在这一轮 GC 中活下去。”**
+
+具体操作是：当你执行 B.ptr = nil 时，写屏障捕获到**旧值是 C**，于是**把 C 标为灰色**（或者把 C 推入扫描队列）。
+
+**加上屏障后的流程**：
+1. 用户执行 B.ptr = nil。
+2. **触发删除写屏障**：发现 B 原来指向 C，**强制把 C 染成灰色**。
+3. GC 继续运行，发现 C 是灰色。
+4. GC 扫描 C，把 C 标记为黑色。
+5. **结果**：C 存活了下来。A 持有的引用依然有效。程序安全。
+
+假如此时C真的没有人用
+这就是删除写屏障的代价，称为**浮动垃圾（Floating Garbage）**。
+- **宁可错杀，不可放过**：为了防止误删“被移动的对象”（如上面的 C），写屏障采取了保守策略——**所有被断开引用的对象，在这一轮都当做活对象处理**。
+- **后果**：即使 C 真的变成了垃圾，它在这一轮 GC 中也不会被回收。
+- **补救**：等到**下一轮 GC** 时，因为没有人再引用 C 了（也没有写屏障再保护它了），C 就会被正常回收。
+
+
+#### ==混合写屏障解决什么具体痛点==
+1. **满足强/弱三色不变性**：
+    - 不管你怎么改引用，只要被引用过或者正在被引用，屏障都会把它推入灰色队列，保证 GC 能扫描到它。
+2. **消除了栈重扫（Rescan）**：
+    - 早期的写屏障不保护栈（因为栈上写操作太频繁，加屏障太慢）。导致 GC 结束前必须 STW 重新扫描所有 Goroutine 的栈，防止栈上有黑色引用白色的情况。
+    - 混合写屏障配合栈的特殊处理，使得 GC **在标记结束时不需要 STW 重新扫描栈**，极大地降低了 GC 停顿时间（Pause time）。
+
+### STW是什么意思
+`STW`是`Stop the world`的缩写，通常意义上指的是用户代码被完全停止运行，`STW`越长，对用户代码造成的影响就越大。
+
+### 并发标记清除法的难点是什么
+并发标记清除法的核心难点在于如何保证在用户程序并发修改对象引用时，垃圾回收器仍能正确识别存活对象。
+
+主要难点：
+- 对象消失问题：在标记过程中，如果用户程序删除了从黑色对象到白色对象的引用，同时从灰色对象到该白色对象的引用也被删除，这个白色对象就会被错误回收，但它实际上还是可达的
+- 新对象处理：标记期间新分配的对象如何着色？如果标记为白色，可能被误回收，标记为黑色可能造成浮动垃圾
+
+初始状态：假设某个黑色对象C指向某个灰色对象A，而A指向白色对象B
+`C.ref3 = C.ref2.ref1`：赋值器并发地将黑色对象C指向（ref3）了白色对象B
+`A.ref1 = nil`：移除灰色对象A对白色对象B的引用（ref2）
+最终状态：在继续扫描的过程中，白色对象永远不会被标记为黑色对象了。进而对象B被错误地回收
+![[images/Pasted image 20251128203715.png]]
+### 如何解决并发标记清除时，用户程序并发修改对象引用问题
+Go通过写屏障技术和三色不变性维护来解决这个并发安全问题
+
+核心挑战是防止“对象消失”现象：当黑色对象新增对白色对象的引用，同时灰色到白色的引用被删除时，白色对象可能被错误回收。Go采用混合写屏障策略，在指针赋值时执行额外逻辑：新建引用时将目标对象着为灰色，删除引用时将被删对象标为灰色，这样确保关键对象不会丢失在标记过程中
+同时Go维护了弱三色不变性：允许黑色对象指向白色对象，但要保证从白色对象出发存在全灰色路径可达根对象。栈操作因为频繁且开销敏感，没有采用写屏障技术，而是做了特殊处理：标记开始和结束时分别扫描栈，中间过程不加写屏障
+
+### 什么是写屏障、混合写屏障，如何实现
+写屏障的本质是在编译器在指针赋值操作中插入的额外很短的指令，当执行`*slot = ptr`这样的指针赋值时，写屏障会在赋值前后执行特定逻辑来标记相关对象，防止并发标记过程中对象被错误回收
+首先Dijkstra插入写屏障在建立新引用时将目标对象标为灰色，但删除引用时无保护；Yuasa删除写屏障在删除引用时将原对象标为灰色，但新建引用时无保护。两者都有局限性
+
+### ==Go中的GC的流程是什么==
+
+| 阶段               | 说明                          | 赋值器状态 |
+| ---------------- | --------------------------- | ----- |
+| SweepTermination | 清扫终止状态，为下一个的并发标记做准备工作，启动写屏障 | STW   |
+| Mark             | 扫描标记阶段，与赋值器并发执行，写屏障开启       | 并发    |
+| MarkTermination  | 标记终止阶段，保证一个周期内标记任务完成，停止写屏障  | STW   |
+| GCoff            | 内存清扫阶段，将需要回收的内存归还到堆中，写屏障关闭  | 并发    |
+| GCoff            | 内存规范阶段，将过多的内存归还给操作系统，写屏障关闭  | 并发    |
+
+### GC触发的时机有哪些
+- 主动触发：通过`runtime.GC()`来触发GC，此调用阻塞式地等待当前GC运行完毕
+- 被动触发：分为两种方式：
+	- go后台有一系列监控线程，当超过两分钟没有产生任何GC时，强制触发GC
+	- 内存使用增长一定比例时有可能会触发，每次内存分配时检查当前内存分配量是否已达到阈值（环境变量GOGC）：默认100%，即当前内存扩大一倍时启用GC
+
+### GC关注的指标有哪些
+- CPU使用率：回收算法会在多大程度上拖慢程序？有时候，这个时通过回收占用的CPU时间与其他CPU时间的百分比来描述的
+- GC停顿时间：回收器会造成多长时间的停顿？目前的GC中需要考虑STW和Mark Assist两个部分可能造成的停顿
+- GC停顿频率：回收器造成的停顿频率是怎样的？目前的GC中需要考虑STW和Mark Assist两个部分可能造成的停顿
+- GC可扩展性：当堆内存变大时，垃圾回收器的性能如何？但大部分的程序可能并不关心这个问题
+
+### ==有了GC，为什么还会发生内存泄漏==
+有GC机制的话，内存泄漏其实是预期的能很快被释放的内存其生命周期意外地被延长，导致预计能够立即回收地内存长时间得不到回收
+- 内存被根对象引用而没有得到迅速释放，比如某个局部变量被赋值到了一个全局变量map中
+- goroutine泄漏，一些不当的使用，导致goroutine不能正常退出，也会导致内存泄漏
+
+## Interface
+### ==Go语言中，interface的底层原理是什么==
+Go的interface底层有两种数据结构：**eface和iface**。
+
+**eface是空interface{}的实现**，只包含两个指针：`_type`指向类型信息，`data`指向实际数据。这就是为什么空接口能存储任意类型值的原因，通过类型指针来标识具体类型，通过数据指针来访问实际值。
+```Go
+type eface struct {
+   _type *_type
+   data  unsafe.Pointer
+}
+```
+![[images/Pasted image 20251211231058.png]]
+
+**iface是带方法的interface实现**，包含`itab`和`data`两部分。`itab`是核心，它存储了接口类型、具体类型，以及方法表。方法表是个函数指针数组，保存了该类型实现的所有接口方法的地址。
+```Go
+type iface struct {
+   tab  *itab
+   data unsafe.Pointer
+}
+```
+```Go
+type itab struct {
+   inter *interfacetype
+   _type *_type
+   hash  uint32 // copy of _type.hash. Used for type switches.
+   _     [4]byte
+   fun   [1]uintptr // variable sized. fun[0]==0 means _type does not implement inter.
+}
+```
+![[images/Pasted image 20251211231132.png]]
+
+### iface和eface的区别是什么
+iface和eface的核心区别在于是否包含方法信息。
+
+eface是空接口interface{}的底层实现，结构非常简单，只有两个字段：`_type`指向类型信息，`data`指向实际数据。因为空接口没有方法约束，所以不需要存储方法相关信息。
+
+iface是非空接口的底层实现，结构相对复杂，包含`itab`和`data`。关键是这个`itab`，它不仅包含类型信息，还包含了一个方法表，存储着该类型实现的所有接口方法的函数指针。
+
+### 类型转换和断言的区别是什么
+`类型转换`、`类型断言`本质都是把一个类型转换成另外一个类型。不同之处在于，类型断言是对接口变量进行的操作。对于**类型转换**而言，类型转换是在编译期确定的强制转换，转换前后的两个类型要相互兼容才行，语法是`T(value)`。而**类型断言**是运行期的动态检查，专门用于从接口类型中提取具体类型，语法是`value.(T)`
+
+**安全性差别很大**：类型转换在编译期保证安全性，而类型断言可能在运行时失败。所以实际开发中更常用安全版本的类型断言`value, ok := x.(string)`，通过ok判断是否成功。
+
+**使用场景不同**：类型转换主要解决数值类型、字符串、切片等之间的转换问题；类型断言主要用于接口编程，当你拿到一个interface{}需要还原成具体类型时使用。
+
+**底层实现也不同**：类型转换通常是简单的内存重新解释或者数据格式调整；类型断言需要检查接口的底层类型信息，涉及到runtime的类型系统。
+
+### interface有哪些应用场景
+Go语言的interface主要有几个核心应用场景：
+1. **依赖注入和解耦**。通过定义接口抽象，让高层模块不依赖具体实现，比如定义一个`UserRepo`接口，具体可以是MySQL、Redis或者Mock实现。这样代码更容易测试和维护，也符合SOLID原则。
+2. **多态实现**。比如定义一个`Shape`接口包含`Area()`方法，不同的图形结构体实现这个接口，就能用统一的方式处理各种图形。这让代码更加灵活和可扩展。
+3. **标准库中大量使用interface来提供统一API**。像`io.Reader`、`io.Writer`让文件、网络连接、字符串等都能用统一的方式操作；`sort.Interface`让任意类型都能使用标准库的排序算法。
+4. **还有类型断言和反射的配合使用**，比如JSON解析、ORM映射等场景，先用`interface{}`接收任意类型，再通过类型断言或反射处理具体逻辑。
+5. **插件化架构也heavily依赖interface**。比如Web框架的中间件、数据库驱动、日志组件等，都通过接口定义规范，让第三方能够轻松扩展功能。
+
+
+## 反射
+### 什么是反射
+反射是指计算机程序在运行时（runtime）可以访问、检测和修改它本身状态或行为的一种能力。用比喻来说，反射就是程序在运行的时候能够“观察”并修改自己的行为
+
+### Go如何实现反射
+Go语言反射是通过接口来实现的，一个接口变量包含两个指针结构：一个指针指向类型信息，另一个指针指向实际数据。当我们将一个具体类型的变量赋值给一个接口时，Go就会把这个变量的类型信息和数据地址都存到这个接口变量中
+
+有了这个前提，Go语言就可以通过`reflect`包的`Type`和`ValueOf`这两个函数读取接口变量里的类型信息和数据信息。把这些内部信息解包成可供我们检查和操作的对象，完成在运行时对程序本身的动态访问和修改
+
+### Go的反射应用有哪些
+- JSON序列化是最常见的应用，像`encoding/json`包通过反射动态获取结构体字段信息，实现任意类型的序列化和反序列化。这也是为什么我们能直接用`json.Marshal`处理各种自定义结构体的原因
+- ORM框架，比如GORM通过反射分析结构体字段，自动生成SQL语句和字段映射。它能动态读取struct tag来确定数据库字段名、约束等信息，大大简化了数据库操作
+- Web框架的参数绑定也大量使用了反射，像Gin框架的`ShouldBind`方法，能够根据请求类型自动将HTTP参数绑定到结构体字段上，这背后就是通过反射实现的类型转换和赋值
+
+### 如何比较两个对象完全相同
+- 最直接的就是使用`reflect.DeepEqual`
+- 对于简单类型，可以直接使用`==`操作符
+
+
+## sync
+### ==除了mutex还有什么方式安全读写共享变量==
+除了Mutex，主要还有**信号量**、**通道（Channel），原子操作（atomic）** 这几种方式。
+
+信号量的实现其实跟mutex差不多，实现起来也很方便，主要通过信号量计数来保证。chanenl是Go最推崇的方式，它通过通信来传递数据所有权，从根源上避免竞争，更适合复杂的业务逻辑；而原子操作则针对最简单的整型或指针等进行无锁操作，性能最高，常用于实现计数器或状态位。选择哪种，完全取决于数据结构的复杂度和业务的读写模型。
+
+
+### Go语言如何实现原子操作
+Go语言实现原子操作，其根本是**依赖底层CPU硬件提供的原子指令**，而不是通过操作系统或更上层的锁机制。
+
+具体来说，Go的`sync/atomic`包中的函数，在编译时会被编译器识别，并直接转换成对应目标硬件平台（如x86、ARM）的单条原子机器指令。例如，在x86架构上，`atomic.AddInt64`这类操作会对应到像`LOCK; ADD`这样的指令。前面的`LOCK`前缀是关键，它会锁住总线或缓存行，确保后续的`ADD`指令在执行期间，其他CPU核心不能访问这块内存，从而保证了整个操作的原子性。
+
+### 原子操作和锁的区别
+原子操作和锁最核心的区别在于它们的**实现层级**和**保护范围**。
+
+**原子操作**是CPU硬件层面的"微观"机制，它保证对单个数据（通常是整型或指针）的单次读改写操作是绝对不可分割的，性能极高，因为它不涉及操作系统内核的介入和goroutine的挂起。
+
+**锁**则是操作系统或语言运行时提供的"宏观"机制，它保护的是一个**代码块**（临界区），而不仅仅是单个变量。当获取锁失败时，它会让goroutine休眠，而不是空耗CPU。虽然锁的开销远大于原子操作，但它能保护一段复杂的、涉及多个变量的业务逻辑。
+
+所以，对于简单的计数器或标志位更新，用原子操作追求极致性能；而只要需要保护一段逻辑或多个变量的一致性，就必须用锁。
+
+### ==互斥锁mutex的底层是怎么实现的==
+mutex底层是通过原子操作加信号量来实现的，通过atomic 包中的一些原子操作来实现锁的锁定，通过信号量来实现协程的阻塞与唤醒
+
+互斥锁对应的底层结构是`sync.Mutex`结构体
+```Go
+type Mutex struct {
+	state int32
+	sema uint32
+}
+```
+state表示锁的状态，有锁定、被唤醒、饥饿模式等，并且是用state的二进制位来标识的，不同模式下会有不同的处理方式
+![](https://golangstar.cn//assets/img/go%E8%AF%AD%E8%A8%80%E7%B3%BB%E5%88%97/go%E9%9D%A2%E8%AF%95%E9%A2%98%E5%BA%93/Sync%E9%9D%A2%E8%AF%95%E9%A2%98/0c8666c9f2a2a24045c7eb16c163a8e9.png)
+
+sema表示信号量，mutex阻塞队列的定位是通过这个变量来实现的，从而实现goroutine的阻塞和唤醒
+![](https://golangstar.cn//assets/img/go%E8%AF%AD%E8%A8%80%E7%B3%BB%E5%88%97/go%E9%9D%A2%E8%AF%95%E9%A2%98%E5%BA%93/Sync%E9%9D%A2%E8%AF%95%E9%A2%98/cacc64449f25f934740cbdf201affbf3.png)
+
+### ==Mutex有几种模式==
+Go的`Mutex`主要有两种模式：**正常模式（Normal Mode）和饥饿模式（Starvation Mode）**。
+1. **正常模式**：这是默认模式，讲究的是性能。新请求锁的goroutine会和等待队列头部的goroutine竞争，新来的goroutine有几次"自旋"的机会，如果在此期间锁被释放，它就可以直接抢到锁。这种方式吞吐量高，但可能会导致队列头部的goroutine等待很久，即"不公平"。
+2. **饥饿模式**：当一个goroutine在等待队列中等待超过1毫сан（1ms）后，Mutex就会切换到此模式，讲究的是公平。在此模式下，锁的所有权会直接从解锁的goroutine移交给等待队列的头部，新来的goroutine不会自旋，必须排到队尾。这样可以确保队列中的等待者不会被"饿死"。
+
+当等待队列为空，或者一个goroutine拿到锁时发现它的等待时间小于1ms，饥饿模式就会结束，切换回正常模式。这两种模式的动态切换，是Go在性能和公平性之间做的精妙平衡。
+
+### 在Mutex上自旋的goroutine会占用太多资源吗
+并不会，因为Go的自旋设计得非常"克制"和"智能"。
+
+首先，自旋不是无休止的空转，它有严格的次数和时间限制，通常只持续几十纳秒。其次，自旋仅仅在特定条件下才会发生，比如CPU核数大于1，并且当前机器不算繁忙（没有太多goroutine在排队）。它是在赌，与其付出"goroutine挂起和唤醒"这种涉及内核调度的巨大代价，不如原地"稍等一下"，因为锁可能马上就释放了。
+
+所以，这种自旋是一种机会主义的短线优化，目的是用极小的CPU开销去避免一次昂贵的上下文切换，在锁竞争不激烈、占用时间极短的场景下，它反而是**节省**了资源。
+
+### ==Mutex已经被一个Goroutine获取了，其他等待中的Goroutine只能一直等待。那么等这个锁释放之后，等待中的Goroutine中哪一个会优先获取Mutex呢？==
+取决于Mutex当前处于正常模式还是饥饿模式。
+
+在**正常模式**下，锁的分配是"不公平"的。当锁被释放时，等待队列中的第一个goroutine会被唤醒，但它**不一定**能拿到锁。它需要和那些此刻刚刚到达、正在自旋的新goroutine进行竞争。新来的goroutine因为正在CPU上运行，很有可能"插队"成功，直接抢到锁。这种策略的优点是吞吐量高，但缺点是可能导致等待队列中的goroutine被饿死。
+
+而一旦Mutex进入**饥饿模式**，锁的分配就变得"绝对公平"。锁被释放后，会直接移交给等待队列的队头goroutine，任何新来的goroutine都不会参与竞争，必须乖乖排到队尾。
+
+### sync.Once的作用是什么，讲讲其底层实现原理
+`sync.Once`的作用是**确保一个函数在程序生命周期内，无论在多少个goroutine中被调用，都只会被执行一次**。它常用于单例对象的初始化或一些只需要执行一次的全局配置加载
+
+`sync.Once`保证代码段只执行1次的原理主要是其内部维护了一个标识位，当它 == 0 时表示还没执行过函数，此时会加锁修改标识位，然后执行对应函数。后续再执行时发现标识位 != 0，则不会再执行后续动作了
+
+Once其实是一个结构体
+```Go
+type Once struct {
+	done uint32 // 标识位
+	m Mutex
+}
+```
+核心依赖一个`uint32`的`done`标志位和一个互斥锁`Mutex`，
+当`Once.Do(f)`首次被调用时：
+1. 它首先会通过原子操作（`atomic.LoadUint32`）快速检查`done`标志位。如果`done`为1，说明初始化已完成，直接返回，这个路径完全无锁，开销极小。
+2. 如果`done`为0，说明可能是第一次调用，这时它会进入一个慢路径（`doSlow`）。
+3. 在慢路径里，它会先**加锁**，然后**再次检查**`done`标志位。这个"双重检查"（Double-Checked Locking）是关键，它防止了在多个goroutine同时进入慢路径时，函数`f`被重复执行。
+4. 如果此时`done`仍然为0，那么当前goroutine就会执行传入的函数`f`。执行完毕后，它会通过原子操作（`atomic.StoreUint32`）将`done`标志位置为1，最后**解锁**。
+
+之后任何再调用`Do`的goroutine，都会在第一步的原子`Load`操作时发现`done`为1而直接返回。整个过程结合了原子操作的速度和互斥锁的安全性，高效且线程安全地实现了"仅执行一次"的保证
+
+### ==WaitGroup是怎样实现协程等待的==
+`WaitGroup`实现等待，本质上是**一个原子计数器和一个信号量的协作**。
+调用`Add`会增加计数值，`Done`会减计数值。而`Wait`方法会检查这个计数器，如果不为零，就利用信号量将当前goroutine高效地挂起。直到最后一个`Done`调用将计数器清零，它就会通过这个信号量，一次性唤醒所有在`Wait`处等待的goroutine，从而实现等待目的。
+
+WaitGroup的结构定义：
+```Go
+type WaitGroup struct {
+	noCopy noCopy // 用于vet工具检查是否被复制
+	
+	// 64位的值：高32位是计数器，低32位是等待的goroutine数量
+	// 通过原子操作访问，保存了状态和等待者数量
+	state atomic.Uint64
+
+	// 用于等待者休眠的信号量
+	sema uint32
+}
+```
+**`noCopy`**: 这是一个特殊的字段，用于静态分析工具（`go vet`）在编译时检查`WaitGroup`实例是否被复制。`WaitGroup`被复制后会导致状态不一致，可能引发程序错误，因此该字段的存在旨在防止此类问题的发生。
+
+**`state`**: 这是`WaitGroup`的核心，一个64位的无符号整型，通过`sync/atomic`包进行原子操作，以保证并发安全。这个64位的空间被巧妙地分成了两部分：
+- **高32位**: 作为**计数器（counter）**，记录了需要等待的 goroutine 的数量。
+- **低32位**: 作为**等待者计数器（waiter count）**，记录了调用`Wait()`方法后被阻塞的 goroutine 的数量。
+
+**`sema`**: 这是一个信号量，用于实现 goroutine 的阻塞和唤醒。当主 goroutine 调用`Wait()`方法且计数器不为零时，它会通过这个信号量进入休眠状态。当所有子 goroutine 完成任务后，会通过这个信号量来唤醒等待的主 goroutine。
+
+### WaitGroup
+`sync.WaitGroup`是“等待计数器”：用于等待一组协程完成
+它是一个计数信号量。主协程，使用它来阻塞等待一组子协程执行完毕
+- `Add(delta int)`：增加计数（派发任务）
+- `Done()`：减少计数（任务完成，等同于`Add(-1)`）
+- `Wait()`：阻塞当前协程，知道计数器归零
+- Add必须在协程启动之前就执行，因为主协程的执行速度非常快，可能在子协程还没来得及执行wg.Add(1)之前，就已经执行到了wg.Wait()
+
+使用WaitGroup的原则是谁启动协程，谁负责Add：
+如果协程 A 要启动 B 和 C，应该由 A 来负责 wg.Add，或者 A 自己维护一个独立的 `WaitGroup`。
+比如这样的代码就可能出现计数器计数为负数panic或者A还未执行结束，主协程就退出的情况：
+```Go
+wg.Add(2) // 初始计数器 = 2
+
+// 启动子协程 A
+go func() {
+    // A 内部又启动了两个孙子协程 B 和 C
+    // 注意：这里没有再次调用 wg.Add()，而是直接复用初始的计数器
+    
+    go func() {
+        defer wg.Done() // B 完成
+        // ... B 的工作 ...
+    }()
+    
+    go func() {
+        defer wg.Done() // C 完成
+        // ... C 的工作 ...
+    }()
+    
+    defer wg.Done() // A 完成
+    // ... A 的工作 ...
+}()
+
+wg.Wait()
+```
+修正后：
+```Go
+wg.Add(1) // Main 只负责 A
+go func() {
+    defer wg.Done() // A 完成时抵消 Main 的 Add(1)
+    
+    // A 内部如果要启动 B 和 C，应该由 A 来 Add
+    // 或者使用一个新的 wg2
+    
+    var wgInner sync.WaitGroup
+    wgInner.Add(2)
+    
+    go func() { defer wgInner.Done(); /* B work */ }()
+    go func() { defer wgInner.Done(); /* C work */ }()
+    
+    wgInner.Wait() // A 等待 B 和 C 完成
+}()
+
+wg.Wait() // Main 等待 A 完成
+```
+
+#### 应用场景
+- **并行任务汇聚 (Scatter-Gather)**：你需要并发处理 10 个文件，或者并发请求 5 个 API，然后等它们**全部**结束后，再汇总结果或退出程序。
+- **防止主进程提前退出**：在 main 函数中启动了 Goroutine，如果不加 WaitGroup，main 函数执行完最后一行代码会直接退出，导致子协程没机会执行完。
+```Go
+package main
+
+import (
+	"fmt"
+	"sync"
+	"time"
+)
+
+func main() {
+	var wg sync.WaitGroup
+
+	for i := 1; i <= 3; i++ {
+		// 1. 计数器 +1 (一定要在 go 关键字之前调用)
+		wg.Add(1)
+		
+		go func(id int) {
+			// 3. 任务完成后计数器 -1
+			defer wg.Done() 
+			
+			fmt.Printf("Worker %d 开始工作...\n", id)
+			time.Sleep(time.Second) // 模拟耗时
+			fmt.Printf("Worker %d 完成工作\n", id)
+		}(i)
+	}
+
+	// 2. 阻塞等待，直到计数器变为 0
+	fmt.Println("Main: 等待所有 Worker 完成...")
+	wg.Wait()
+	fmt.Println("Main: 所有任务已完成，退出。")
+}
+```
+
+### sync.Pond
+`sync.Pond`是条件通知器，用于在满足特定条件时唤醒一个或多个正在等待的协程
+实现了一个条件变量，它让一组Goroutine在满足特定条件之前一直阻塞等待，当条件改变时，通过信号通知它们“醒来”继续执行
+通常搭配`sync.Mutex`一起使用
+- `Wait()`：解锁并挂起当前协程，等待通知。收到通知，会尝试重新加锁
+- `Signal()`：唤醒一个正在等待的协程（单播）
+- `Broadcast()`：唤醒所有正在等待的协程（广播）
+
+#### 为什么需要它（和channel的区别）
+虽然 Channel 也可以实现通知，但在以下场景 Cond 更有优势：
+1. **广播机制**：Channel 关闭可以实现一次性广播，但如果需要**反复**进行“暂停-全部唤醒-暂停”的操作，Channel 处理起来很麻烦，而 Cond.Broadcast() 非常适合。
+2. **复杂条件判断**：Channel 通常传递数据，而 Cond 关注的是“状态”。比如“队列既不空也不满”这种复杂状态。
+
+#### 应用场景
+- **“起跑枪”效应**：10 个运动员（Goroutine）都准备好了（Wait），裁判员开枪（Broadcast），所有人同时起跑。
+- **读写控制/资源池**：当资源不可用时等待，当资源释放时通知等待者。
+```Go
+package main
+
+import (
+	"fmt"
+	"sync"
+	"time"
+)
+
+func main() {
+	var mu sync.Mutex
+	// 创建 Cond，必须绑定一个锁
+	cond := sync.NewCond(&mu)
+	
+	ready := false
+
+	// 启动 3 个等待者
+	for i := 1; i <= 3; i++ {
+		go func(id int) {
+			cond.L.Lock() // 获取锁
+			// 使用 for 循环检查条件（防止虚假唤醒）
+			for !ready {
+				fmt.Printf("Worker %d: 等待信号...\n", id)
+				cond.Wait() // 1. 解锁并挂起  2. 被唤醒后重新加锁
+			}
+			fmt.Printf("Worker %d: 收到信号，开始干活！\n", id)
+			cond.L.Unlock() // 释放锁
+		}(i)
+	}
+
+	time.Sleep(time.Second)
+	fmt.Println("Main: 正在准备数据...")
+	
+	// 修改状态
+	cond.L.Lock()
+	ready = true
+	cond.L.Unlock()
+
+	fmt.Println("Main: 数据准备完毕，广播通知所有 Worker！")
+	// 唤醒所有等待者
+	cond.Broadcast() 
+
+	time.Sleep(time.Second) // 防止主程退出太快
+}
+```
+
+### sync.Pool 
+sync.Pool是Go语言中用于减少GC压力、复用临时对象的高性能并发安全池
+其设计哲学是：将数据分散到各个P上，尽量减少锁竞争，同时利用局部性原理
+
+#### 核心数据结构
+sync.Pool并不是把所有对象都放在一个大的切片里，而是为每个P单独分配了一个本地池
+```GO
+type Pool struct {
+    noCopy noCopy
+
+    local     unsafe.Pointer // [P]poolLocal 数组的指针，每个 P 对应一个
+    localSize uintptr        // P 的数量
+
+    victim     unsafe.Pointer // 上一轮 GC 幸存下来的数据 (二级缓存)
+    victimSize uintptr
+
+    New func() interface{} // 用户自定义的创建函数
+}
+
+type poolLocal struct {
+    poolLocalInternal
+    // 占位符，防止 CPU 缓存行的伪共享 (False Sharing)
+    pad [128 - unsafe.Sizeof(poolLocalInternal{})%128]byte 
+}
+
+type poolLocalInternal struct {
+    private interface{}   // 私有对象：只能由当前 P 访问 (无锁！)
+    shared  poolChain     // 共享列表：本地 P 可推/弹，其他 P 可偷 (需要锁)
+}
+```
+1. **local 数组**：大小等于 GOMAXPROCS。每个 P 都有自己的 poolLocal。
+2. **private (私有区)**：这是一个单一的字段，不是列表。
+    - **最快路径**：当前 P 操作时，优先读写这里。
+    - **无锁**：因为同一时刻一个 P 只能运行一个 Goroutine，且操作期间禁止抢占，所以访问这里**完全不需要加锁**。
+3. **shared (共享区)**：这是一个**双端队列**（实际上是链表+环形数组）。
+    - **本地 P**：从**头部** push 和 pop。
+    - **其他 P（窃取者）**：从**尾部** pop（偷）。
+    - **需要锁**：因为存在并发访问（本地 P 和 偷窃者 P），所以需要互斥锁保护。
+
+
+
+### ==sync.Mutex和sync.RWMutex的区别==
+- sync.Mutex：完全互斥。不管是读还是写，同一时间只能有一个Goroutine持有锁
+- sync.RWMutex：读写分离。允许多个Goroutine同时读，但写操作依然是完全互斥的
+
+sync.Mutex：
+- Lock()：请求锁。如果锁被占用（无论是被谁），当前Goroutine阻塞
+- Unlock()：释放锁
+
+sync.RWMutex：
+- 写锁（Lock/Unlock）：和Mutex一样，是排他的
+- 读锁（RLock/RUnlock）：是共享的
+
+RWMutex不一定比Mutex快：
+- **sync.Mutex**：
+    - **实现简单**：结构体很小，主要涉及 CAS 操作和信号量。
+    - **性能**：单次加锁/解锁的 CPU 开销非常小。
+    - **适用**：写操作频繁，或者读写比例相当，或者临界区代码非常短的场景。
+- **sync.RWMutex**：
+    - **实现复杂**：它内部维护了更多的计数器（读者数量、等待的写者数量等），甚至内部包含了一个 Mutex。
+    - **性能**：由于逻辑复杂，单次 RLock 的开销实际上比 Mutex.Lock 要**大**。
+    - **优势**：它的性能优势体现在**并发度**上。虽然单次操作贵，但如果 100 个请求里有 99 个是读，这 99 个可以同时跑，总吞吐量远高于 Mutex。
+    - **适用**：**读多写少**（Read-Heavy）的场景（例如：配置加载、缓存读取）。
+
+假设有源源不断的读者（G1, G2 ... G1000）进来加 RLock，如果 RWMutex 设计得不好，想要加 Lock 的写者（Writer）可能永远排不上队，这就是**写锁饥饿**。
+
+**Go 的 RWMutex 设计策略：写锁优先（Writer Preferred）。**
+- 当一个写者（Writer）调用 Lock() 尝试获取锁时，如果发现此时已经有读者（Reader）持有锁，写者会等待。
+- **关键点**：为了避免写者饿死，**在写者等待期间，后续新来的读者（Reader）调用 RLock() 会被阻塞**，不能插队。
+- 等当前正在读的那几个读者完事后，写者立刻获得锁。
+
+### ==`sync.Map`的底层原理==
+`sync.Map`的底层核心是“空间换时间”，通过两个Map（`read`和`dirty`）的冗余结构，实现“读写分离”，最终达到针对特定场景的“读”场景无锁优化
+
+它的`read`是一个只读的map，提供无锁的并发读取，速度极快。写操作则会先操作一个加了锁的、可读写的`dirty map`。当dirty map的数据积累到一定程度，或者read map中没有某个key时，`sync.Map`会将dirty map的数据晋升并覆盖掉旧的read map，完成一次数据同步
+```Go
+type Map struct {
+	mu Mutex // 用于保护dirty字段的锁
+	read atomic.Value // 只读字段，其实际的数据类型是一个readOnly结构
+	dirty map[interface{}]*entry //需要加锁才能访问的map，其中包含在read中除了被expunged（删除）以外的所有数据，以及新加入的元素
+	misses int // 计数器，记录在从read中读取数据的时候，没有命中的次数，当misses值等于dirty长度时，dirty晋升为read
+}
+```
+`read`字段的类型为`atomic.Value`，但是在使用中里面其实存储的是`readOnly`结构，`readOnly`结构定义：
+```Go
+type readOnly struct {
+	m map[interface{}]*entry // key为任意可比较类型，value为entry指针
+	amended bool // amended为true，表明dirty中包含read中没有的数据，为false表明dirty中的数据在read中都存在
+}
+```
+```Go
+type entry {
+	p unsafe.Pointer // p指向真正的value所在的地址
+}
+```
+![[images/Pasted image 20251129123040.png]]
+
+### read map和dirty map之间有什么关联
+它们之间只是“只读缓存“和”最新全集“的关联
+read map是dirty map的一个不完全的、且可能是过期的只读快照。dirty map则包含了所有最新的数据
+当dirty map积累了足够多的新数据后，它会晋升为新的read map，旧的read map则被废弃，这个过程，就完成了缓存的更新
+
+### 为什么要设计nil和expunged两种删除状态
+因为read map本身是只读的，我们不能直接从中删除一个key。所以，当用户调用`Delete`时，如果这个key只存在于read map中，系统并不会真的删除它，而是将它的值标记为一个特殊的”已删除“状态，这个状态就是`expunged`。后续的读操作如果看到这个标记，就知道这个key已经不存在，直接返回`nil, false`
+而`nil`则是一个中间状态，主要用于dirty map和read map的同步过程，表示这个key正在被删除或迁移，表示键值对被软删除了，但键还在read map中，且此时read和dirty map可能都持有该引用
+#### 详细原理解析
+
+##### 1. nil 状态：为了实现无锁删除（Soft Delete）
+当你调用 m.Delete(key) 时，如果这个 key 存在于 read map 中，Go 不会直接把它从 map 结构中删掉（因为 read map 不允许修改其结构），而是使用 **CAS (Compare-And-Swap)** 操作将 entry 里的指针置为 **nil**。
+- **含义**：“这个 key 目前是删除了的，但在 read map 的底层结构里还占着坑位。”
+- **目的**：**高效**。不需要加锁，不需要重建 map，只需一个原子的 CAS 操作。
+- **此时的状态**：
+    - 如果 dirty map 还没被创建（dirty == nil），一切正常。
+    - 如果 dirty map 存在，dirty 中该 key 对应的 entry 指针也会变成 nil（因为它们指向同一个 entry 地址）。
+##### 2. expunged 状态：为了压缩 dirty map（Cleanup）
+当 read map 的“穿透（miss）”次数过多时，sync.Map 决定把 dirty 升级为 read。之后，当有新的存储请求时，需要重新创建一个新的 dirty map。
+
+**关键点来了：在创建新 dirty map 的时候，我们需要把 read 里的数据复制过去。**
+这时候，如果发现 read 里有个 key 的值是 nil（即已被删除），我们有两个选择：
+1. **复制它**：把这个 nil 也复制到新 dirty 里。
+    - 缺点：dirty map 会越来越大，哪怕里面全是无效数据。
+2. **丢弃它**：不把它复制到新 dirty 里。
+    - 优点：**数据压缩**，新 dirty map 只包含有效数据。
+    - 问题：如果我不复制它，read 里有这个 key（值为 nil），但 dirty 里没有这个 key。**这就破坏了 dirty 包含所有有效数据的假设。**
+
+
+为了解决“丢弃它”带来的数据一致性问题，Go 引入了 **expunged** 状态。
+在创建新 dirty map 遍历 read map 时：
+- 如果遇到 nil 的 entry，Go 会使用 CAS 将其修改为 **expunged**。
+- **这意味着**：“这个 key 已经被我彻底清洗了，它**不在**新的 dirty map 里。”    
+
+##### 3. 为什么通过 Store 复活 key 时需要区分这两种状态？
+假设我们要重新 Store 一个之前被删除的 key：
+**情况 A：状态是 nil**
+- **场景**：Key 被删除了，但 dirty map 还没重建（或者重建时还没来得及清理它）。
+- **操作**：直接通过 CAS 把 nil 替换成新值。
+- **结果**：read map 更新成功。由于 read 和 dirty 指向同一个 entry，dirty map 也自动“看”到了新值。**无需加锁，性能高。**
+
+**情况 B：状态是 expunged**
+- **场景**：Key 被删除了，且经过了一轮 dirty 重建，被标记为“不在 dirty 中”。
+- **风险**：如果我直接把 expunged 改回新值，那么 read 里有了这个值，但 dirty 里**没有**这个 key。等下次 dirty 升级成 read 时，**这个 key 就会丢失！**
+- **操作**：
+    1. 发现是 expunged，**加互斥锁**。
+    2. 把 expunged 改回 nil（unexpunge）。
+    3. **把这个 key 重新塞回 dirty map 中。**
+    4. 更新值为新值。
+- **结果**：保证了 read 和 dirty 的数据一致性。
+### Sync.Map适用的场景
+适合读多写少的场景
+
+
+
