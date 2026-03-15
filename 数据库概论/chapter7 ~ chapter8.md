@@ -84,3 +84,15 @@
 ![[images/Pasted image 20260315161727.png]]
 ![[images/Pasted image 20260315161804.png]]
 ![[images/Pasted image 20260315161816.png]]
+
+![[images/Pasted image 20260315162502.png]]
+
+![[images/Pasted image 20260315162545.png]]
+### Design Issues
+![[images/Pasted image 20260315163529.png]]
+![[images/Pasted image 20260315163542.png]]
+![[images/Pasted image 20260315163553.png]]
+![[images/Pasted image 20260315163621.png]]
+![[images/Pasted image 20260315163641.png]]
+![[images/Pasted image 20260315163703.png]]
+![[images/Pasted image 20260315164129.png]]
