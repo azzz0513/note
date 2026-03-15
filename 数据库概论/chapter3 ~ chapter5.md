@@ -216,3 +216,26 @@ SELECT
 	END AS grade 
 FROM student;
 ```
+
+## 中级SQL（Intermediate SQL）
+### joined relations
+![[images/Pasted image 20260315141036.png]]
+![[images/Pasted image 20260315141324.png]]
+![[images/Pasted image 20260315141506.png]]
+
+#### outer join（外连接）
+![[images/Pasted image 20260315141304.png]]
+![[images/Pasted image 20260315141337.png]]
+![[images/Pasted image 20260315141347.png]]
+![[images/Pasted image 20260315141517.png]]
+
+![[images/Pasted image 20260315141618.png]]
+### on
+给Join指定连接规则：哪两个字段相等，表就怎么连
+特点：
+- 不管字段名是否相同都能使用
+- 可以加额外条件
+- 必须写表别名/表名。字段
+
+### using
+当两个表的连接字段完全一样时
