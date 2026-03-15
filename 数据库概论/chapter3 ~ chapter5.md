@@ -237,5 +237,96 @@ FROM student;
 - 可以加额外条件
 - 必须写表别名/表名。字段
 
+on中的两个字段都会出现
+
 ### using
-当两个表的连接字段完全一样时
+当两个表的连接字段完全一样时，用using来简化on
+==**必须满足两个条件**==：
+1. 连接字段名必须一摸一样
+2. 字段名必须加括号
+
+结果会自动合并相同字段（using指定的字段），只显示一个id
+
+### views
+![[images/Pasted image 20260315142319.png]]
+![[images/Pasted image 20260315142332.png]]
+
+example：
+![[images/Pasted image 20260315142418.png]]
+![[images/Pasted image 20260315142426.png]]
+
+![[images/Pasted image 20260315142628.png]]
+![[images/Pasted image 20260315142730.png]]
+
+### transactions（事务）
+![[images/Pasted image 20260315142814.png]]
+
+### integrity constraints（完整性约束）
+![[images/Pasted image 20260315142925.png]]
+完整性约束 = 数据库给自己定的规矩
+用来保证数据正确、不乱、不矛盾
+
+![[images/Pasted image 20260315143352.png]]
+
+![[images/Pasted image 20260315143424.png]]
+
+#### 实体完整性（保证每条记录唯一、不重复）
+每条记录必须能唯一区分
+
+关键字：
+- primary key（主键）
+- unique（唯一）
+
+#### 参照完整性（保证表之间关系不乱）
+![[images/Pasted image 20260315143501.png|560]]
+![[images/Pasted image 20260315143553.png]]
+
+外键必须引用真实存在的数据
+
+关键字：
+- foreign key（外键）
+#### 域完整性（保证字段数据合法）
+字段内容格式正确、范围正确
+
+关键字：
+- not null（非空）
+- check（检查范围）
+- default（默认值）
+
+### cascade
+级联操作：主表数据变了，子表跟着一起变（删、改）
+
+配合外键一起使用：
+- 当删除/更新主表一条记录的时候
+- 所有子表关联的数据都会自动跟着删除/更新
+
+1. `on delete cascade`：删除主表数据，子表关联数据自动删除
+2. `on update cascade`：修改主表数据，子表关联数据自动修改
+3. 当两个都没有使用时，主表数据不能删，也不能改
+
+### foreign key
+外键可以引用：
+- （/复合）主键（primary key）
+- （/复合）唯一键（unique）
+- 只要该列在主表中是唯一+不重复的，就能当外键使用
+
+### date
+![[images/Pasted image 20260315143822.png]]
+
+### index
+![[images/Pasted image 20260315143844.png]]
+
+### type
+![[images/Pasted image 20260315144642.png]]
+
+### domain
+![[images/Pasted image 20260315144801.png]]
+
+### privileges
+![[images/Pasted image 20260315144845.png]]
+
+### revoke
+![[images/Pasted image 20260315144912.png]]
+
+### role
+![[images/Pasted image 20260315144928.png]]
