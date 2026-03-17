@@ -65,3 +65,35 @@ Search Key：用于查找文件中记录的属性集的属性
 ## B+-Tree update
 ![[images/Pasted image 20260316221359.png]]
 ![[images/Pasted image 20260316221412.png]]
+![[images/Pasted image 20260317213805.png]]
+![[images/Pasted image 20260317213823.png]]
+![[images/Pasted image 20260317213854.png]]
+
+![[images/Pasted image 20260317214052.png]]
+![[images/Pasted image 20260317215242.png]]
+![[images/Pasted image 20260317215326.png]]
+![[images/Pasted image 20260317215410.png]]
+![[images/Pasted image 20260317215640.png]]
+
+![[images/Pasted image 20260317220203.png]]
+![[images/Pasted image 20260317220343.png]]
+![[images/Pasted image 20260317220741.png]]
+![[images/Pasted image 20260317221150.png]]
+![[images/Pasted image 20260317221217.png]]
+![[images/Pasted image 20260317221228.png]]
+
+## hashing
+![[images/Pasted image 20260317221254.png]]
+![[images/Pasted image 20260317221307.png]]
+![[images/Pasted image 20260317221335.png]]
+![[images/Pasted image 20260317221428.png]]
+![[images/Pasted image 20260317221443.png]]
+![[images/Pasted image 20260317221452.png]]
+![[images/Pasted image 20260317221459.png]]
+![[images/Pasted image 20260317221506.png]]
+![[images/Pasted image 20260317221601.png]]
+
+## index definition
+![[images/Pasted image 20260317221623.png]]
+
+## Query Optimization（查询优化）
