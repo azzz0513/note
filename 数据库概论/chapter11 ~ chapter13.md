@@ -97,3 +97,7 @@ Search Key：用于查找文件中记录的属性集的属性
 ![[images/Pasted image 20260317221623.png]]
 
 ## Query Optimization（查询优化）
+![[images/Pasted image 20260317224503.png]]
+![[images/Pasted image 20260317225606.png]]
+
+## generating equivalent expression
