@@ -162,7 +162,8 @@ func main() {
 // index: 3, value: d, type: int32
 // index: 3, value: d, type: uint8
 ```
-- 当使用for rangeshi
+- 当使用for range时，会获取到rune类型（int32），会按Unicode字符遍历
+- 当使用索引遍历时，会获取到byte类型（uint8），因为string的底层为`[]byte`
 
 ### ==defer的执行顺序？defer的作用或使用场景是什么？==
 defer的执行顺序和调用顺序相反，类似于栈（LIFO）
