@@ -140,6 +140,30 @@ go build -ldflags "-s -w" -o myapp main.go
 - `strings.join`：`stirngs.join`也是基于`strings.builder`来实现的，并且可以自定义分隔符，在join方法内调用了`b.Grow(n)`方法，这个是进行初步的容量分配，而前面计算的n的长度就是我们要拼接的slice的长度，因为我们传入切片长度固定，所以提前进行容量分配可以减少内存分配
 性能比较：`strings.join`=`strings.builder`>`bytes.Buffer`>`+`>`fmt.Sprintf`
 
+### 当s为string类型，不同方式遍历数组，获取的数据类型是否相同
+遍历string类型时，不同方式遍历，获取到的类型会不相同
+```Go
+func main() {
+    s := "abcd"
+
+    for i, w := range s {
+        fmt.Printf("index: %d, value: %c, type: %T\n", i, w, w)
+        w1 := s[i]
+        fmt.Printf("index: %d, value: %c, type: %T\n", i, w1, w1)
+    }
+}
+
+// index: 0, value: a, type: int32
+// index: 0, value: a, type: uint8
+// index: 1, value: b, type: int32
+// index: 1, value: b, type: uint8
+// index: 2, value: c, type: int32
+// index: 2, value: c, type: uint8
+// index: 3, value: d, type: int32
+// index: 3, value: d, type: uint8
+```
+- 当使用for rangeshi
+
 ### ==defer的执行顺序？defer的作用或使用场景是什么？==
 defer的执行顺序和调用顺序相反，类似于栈（LIFO）
 
