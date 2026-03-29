@@ -231,6 +231,22 @@ func main() {
 输出：10
 原因：符合“参数即时求值”的规则，10 被拷贝进去了。
 
+### 多层defer中发生panic时，是否会继续执行
+在 Go 语言中，当多层 defer 中发生 panic 时，程序会停止当前正常执行流程，但会按照 defer 的逆序执行所有已注册的 defer 函数。这是 Go 语言的异常处理机制，确保资源能够被正确释放。
+
+具体来说，当 panic 发生时，Go 会立即停止当前函数的执行，开始执行当前 goroutine 中所有已注册的 defer 函数。
+
+这些 defer 函数会按照后进先出的顺序执行，即使 panic 发生在某个 defer 函数内部，其他 defer 函数仍然会被执行。
+
+例如，如果有三个 defer 函数 A、B、C 按顺序注册，当 panic 发生时，会先执行 C，然后是 B，最后是 A。这个过程完成后，程序才会真正终止。
+
+defer语句的正常执行顺序：
+![](https://mmbiz.qpic.cn/mmbiz_jpg/x3KhuIa4ia2DQhdKMVict65LqQVm9RmwGliblbLnCgZ4GOEEEicPxXAX09eUWyNGmywWciaGMIsEsxyrDcciamOuTXic1NC21jzOSDZoIl381cnzGQ/640?wx_fmt=jpeg&from=appmsg&tp=wxpic&wxfrom=5&wx_lazy=1#imgIndex=1)
+
+多层defer语句发生PANIC时的执行顺序：
+
+
+
 ### 什么是rune类型
 Go中的字符有以下两种类型：
 - uint8类型，也叫byte类型，代表了ASCII码的一个字符
