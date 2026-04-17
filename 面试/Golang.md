@@ -112,6 +112,7 @@ go build -ldflags "-s -w" -o myapp main.go
 - 协程：协程是一种用户态的轻量级线程，协程的调度完全是由用户来控制的。协程拥有自己的寄存器上下文和栈。协程调度切换时，将寄存器上下文和栈保存到其他地方，在切回来的时候，恢复先前保存的寄存器上下文和栈，直接操作栈则基本没有内核切换的开销，可以不加锁的访问全局变量，所以上下文的切换非常快
 
 ### 值类型和引用类型的区别
+==是否共享底层数据==
 - 值类型：变量→直接存数据
 	- 示例（伪内存）：`a = 10`→`内存：a: 10`
 - 引用类型：变量→存地址→指向真实数据
@@ -163,7 +164,34 @@ func f(arr []int) {
     arr[0] = 100
 }
 ```
-外部数据会被x
+外部数据会被修改
+
+#### Go里的具体类型
+值类型：
+```Go
+int
+float
+bool
+struct
+array
+```
+特点：
+- 赋值 = 拷贝
+- 修改互不影响
+
+
+引用：
+```Go
+slice
+map
+channel
+pointer
+interface
+```
+特点：
+- 赋值 = 共享底层数据
+- 修改会影响其他变量
+
 
 ### ==make和new的区别==
 在Golang中，`make`和`new`都是用于内存分配的内建函数，但它们的使用场景和功能有所不同：
@@ -336,26 +364,20 @@ panic: defer2 内部发生 panic ...
 ### 在Go语言中，panic会跨goroutine传播吗
 `panic` 的捕获逻辑是 goroutine 局部的，子 goroutine 发生的 `panic` 无法在父 goroutine 中被捕获。
 
-如果一个**普通的后台 Goroutine**（例如通过 `go func()` 启动的工作线程）发生了 panic 且没有被 recover：
-- **后果**：**只有这个 Goroutine 会死掉**。
-- **程序状态**：整个程序**不会**崩溃，其他 Goroutine（包括 main goroutine）会继续正常运行。
-- **现象**：你会在控制台看到 panic 的堆栈信息，但程序进程依然在运行。
+每一个 goroutine 都有自己独立的调用栈（Call Stack）。当在一个 goroutine 中发生 panic 时，它只会沿着**当前** goroutine 的调用栈向上回溯（Unwinding）。
+但是，这里有一个极其重要的副作用：**如果一个 goroutine 中的 panic 没有被该 goroutine 内部的 recover 捕获，整个 Go 程序（所有的 goroutine）都会崩溃并退出。**
 
-如果 **main 函数所在的 Goroutine**（也就是主协程）发生了 panic 且没有被 recover：
-- **后果**：**整个进程会立即退出**。
-- **程序状态**：程序崩溃，所有正在运行的其他 Goroutine 会被强制杀掉。
-- **原因**：因为 `main` 函数是程序的入口，它的返回或崩溃意味着程序逻辑的终结。
+**任何一个** goroutine（无论是不是 main goroutine，哪怕是你随手启动的最不起眼的一个后台协程）发生了 panic，只要它自己内部没有被 recover 捕获，**一定会导致整个 Go 进程直接崩溃，所有正在运行的 goroutine 都会瞬间全部死亡**。
 
-**==潜在的风险：虽然不是崩溃，但也很危险==**
-虽然普通 Goroutine 的 panic 不会让程序崩溃，但它可能会引发**逻辑上的“崩溃”**：
-- **死锁**：如果 panic 的 Goroutine 持有一个锁（Mutex），或者正准备释放锁，那么锁将永远无法被释放。其他等待这个锁的 Goroutine 就会永远阻塞，最终导致程序看起来像“死机”了（Deadlock）。
-- **资源泄漏**：如果 panic 的 Goroutine 负责维护一个连接池或通道，它的意外退出可能导致这些资源无法被回收。
+Go 的 runtime（运行时）将未捕获的 panic 视为**严重的、不可恢复的程序级错误**。  
+当一个 panic 一路向上冒泡，到达了这个 goroutine 的最顶层（也就是启动这个 goroutine 的入口函数）依然没有被 recover 时，Go 的 runtime 会认为：“这个程序已经处于一种未知且危险的状态了，继续运行可能会导致更严重的数据损坏”。
+
+因此，Go runtime 会直接调用底层的退出函数（打印出所有 goroutine 的堆栈信息，然后以状态码 2 退出进程），而不是只停掉出问题的那个 goroutine。
 
 ### 什么是rune类型
 Go中的字符有以下两种类型：
 - uint8类型，也叫byte类型，代表了ASCII码的一个字符
 - rune类型，代表一个UTF-8类型，当需要处理中文、日文或者其他复合字符时，则需要使用rune类型。rune类型等价于int32类型
-
 
 ### tag有什么用
 tag可以为结构体成员提供属性，常见的有：
@@ -446,11 +468,46 @@ if(p == i) {
 
 ### 如何知道一个对象是分配在栈上还是堆上
 Go局部变量会进行逃逸分析。如果变量离开作用域后没有被引用，则优先分配到栈上，否则分配到堆上。
-如何判断是否发生了逃逸：`go build -gcflags '-m -l' xxx.go`
+如何判断是否发生了逃逸：`go build -gcflags='-m -l' xxx.go`
 关于逃逸的可能情况：
 - 变量大小不稳定
 - 变量类型不确定
 - 变量分配的内存超过用户栈最大值，暴露给了外部指针
+
+例：
+```Go
+package main
+
+func foo() *int {
+	x := 10      // x 会分配在堆上还是栈上？
+	return &x
+}
+
+func bar() int {
+	y := 20      // y 会分配在堆上还是栈上？
+	return y
+}
+
+func main() {
+	foo()
+	bar()
+}
+```
+运行：
+```Bash
+go build -gcflags="-m" main.go
+```
+结果：
+```
+# command-line-arguments
+./main.go:3:6: can inline foo
+./main.go:8:6: can inline bar
+./main.go:13:6: can inline main
+./main.go:14:5: inlining call to foo
+./main.go:15:5: inlining call to bar
+./main.go:4:2: moved to heap: x    <--- 【看这里】x 逃逸到了堆上
+```
+从输出可以清楚地看到，编译器提示 moved to heap: x，说明 x 被分配到了堆上。而 y 没有任何提示，说明它留在了栈上。
 
 ### Go的多返回值是如何实现的
 Go语言的多返回值是通过在函数调用栈帧上预留空间并进行值复制来实现的。在函数调用发生时，Go编译器会计算出函数所有返回值的总大小。在为该函数创建栈帧时，就会在调用方（caller）的栈帧上，为这些返回值预留出连续的内存空间。
@@ -689,7 +746,7 @@ func NewServer(addr string, opts ...Option) (*Server, error) { ... }
 ### singleflight
 `singleflight` 是 Go 语言官方扩展库 `golang.org/x/sync` 中的一个非常实用的包。
 
-简单来说，它的作用是**“请求合并”**。在高并发场景下，它能确保**对于同一个 Key 的多个并发请求，底层的执行函数只会被调用一次**，其他请求会阻塞等待，并共享这一次调用的结果。
+简单来说，它的作用是 **“请求合并”**。在高并发场景下，它能确保**对于同一个 Key 的多个并发请求，底层的执行函数只会被调用一次**，其他请求会阻塞等待，并共享这一次调用的结果。
 
 #### 核心结构与方法
 `singleflight` 的核心是一个 `Group` 结构体，它维护了一个 Map 来追踪正在进行的请求。
@@ -756,7 +813,6 @@ func main() {
 
 #### DoChan方法
 如果你不想让 Goroutine 阻塞等待，或者需要配合 `select` 做超时控制，可以使用 `DoChan`。
-
 ```Go
 // 使用 DoChan
 ch := g.DoChan(key, func() (interface{}, error) {
@@ -844,7 +900,7 @@ fmt.Printf("结果: %v, 是否共享: %v\n", result.Val, result.Shared)
 ### singleflight可以完美解决缓存击穿吗
 虽然 `singleflight` 是解决缓存击穿的神器，但它**绝不是完美的**。它只能解决**单机内存层面**的重复请求合并问题，在面对分布式架构、极端异常或复杂业务场景时，它存在明显的局限性。
 
-为了让你更清晰地理解，我们可以把 `singleflight` 比作**“餐厅的一个叫号器”**。它能防止同一个顾客（Key）重复下单，但如果餐厅开连锁店（分布式），或者厨师把锅砸了（异常），这个叫号器就无能为力了。
+为了让你更清晰地理解，我们可以把 `singleflight` 比作 **“餐厅的一个叫号器”**。它能防止同一个顾客（Key）重复下单，但如果餐厅开连锁店（分布式），或者厨师把锅砸了（异常），这个叫号器就无能为力了。
 
 以下是 `singleflight` 无法“完美”解决缓存击穿的 4 大核心原因：
 
@@ -1289,7 +1345,7 @@ func changeSlice(s []int) {
 ```
 
 
-## Map
+## ==Map==
 ### 开放寻址和线性探测
 #### 什么是开放寻址 (Open Addressing)？
 **核心思想：** “如果原本属于我的位置被占了，那我就在表里找个别的地方住下。”
@@ -1311,7 +1367,7 @@ func changeSlice(s []int) {
 
 **查找过程**也是一样的：算出下标，如果里面的数据不是我要的，就看下一个，直到找到目标数据，或者碰到一个空位（说明数据不存在）。
 
-### Swiss Table内存布局
+### ==Swiss Table内存布局==
 从旧版本的`bmap`（桶）。变成了`Group`（分组）
 新的层级结构变成了四层：
 Map(顶层) → Directory（目录）→ Table（表）→ Group（分组）→ Slot（槽位）
