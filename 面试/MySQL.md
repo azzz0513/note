@@ -1422,7 +1422,7 @@ Redo Log 刷盘有三种情况：
 - **id 不同**：id 值越大，优先级越高，越先被执行（通常出现在子查询中）。
 - **id 为 NULL**：通常出现在 UNION 结果集中，表示最后执行。
 
-#### 2. type (访问类型 - 性能判断的核心)
+#### ==2. type (访问类型 - 性能判断的核心)==
 这是判断 SQL 性能好坏最重要的指标，结果值从**最优到最差**依次是：
 - **system / const**：查询唯一行，速度极快（如主键查询）。
 - **eq_ref**：唯一性索引扫描，通常出现在多表 JOIN 中。
@@ -1465,6 +1465,41 @@ Redo Log 刷盘有三种情况：
 		    - `rows`：MySQL预估需要扫描的行数。数值越小越好。如果这个值远大于你预期的结果集大小，说明查询效率低下。
 		    - `Extra`：额外的执行信息。出现 **`Using filesort`**（需要额外排序）或 **`Using temporary`**（使用了临时表）是性能杀手，通常意味着需要优化索引。
     - `SHOW PROFILE`：查看 SQL 执行过程中 CPU、IO 的具体消耗。
+
+步骤：
+```
+1️⃣ 发现接口慢
+2️⃣ 找到对应 SQL
+3️⃣ 查 slow log
+4️⃣ EXPLAIN 分析
+5️⃣ 看是否走索引
+6️⃣ 看 rows / type
+7️⃣ 检查锁 / IO / CPU
+8️⃣ 优化 SQL / 索引
+9️⃣ 压测验证
+```
+
+### 怎么判断MySQL在跑的时候是否会用索引
+- explain（事前判断）：
+	- 基本用法：`explain select ...`
+	- 重点看三个字段：
+		- key（是否用索引）
+		- type（访问的方式，核心指标）
+		- possible_keys（可能用的索引）
+		- `extra`（可选）
+
+- explain analyze
+```
+EXPLAIN ANALYZE SELECT ...
+```
+相较explain：
+- 真的执行SQL
+- 给出真实执行时间
+- 显示是否走索引
+
+- 看extra字段
+	- using filesort：排序没用索引
+	- using temporary：使用lin'shi'bai'o
 
 ### SQL语句层面的优化
 #### 避免全表扫描 (Full Table Scan)

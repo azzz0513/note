@@ -185,3 +185,75 @@ RPC在内部通信中取代HTTP的最主要原因：
     通过 **API 网关**向外部（如前端 App、浏览器、第三方合作伙伴）提供标准的、基于 HTTP 的 RESTful API。这保证了接口的通用性、安全性和易用性，任何系统都能轻松接入。
 2. **内部使用 RPC 通信**  
     在微服务集群**内部**，各个服务之间采用高性能的 RPC 框架（如 gRPC, Dubbo）进行通信。这保证了内部调用的高效率、低延迟和强类型约束。
+
+### gRPC是什么
+gRPC是一个高性能RPC框架，可以让你像调用本地函数一样调用远程服务
+
+例：
+```Go
+user, err := client.GetUser(ctx, &GetUserRequest{Id: 1})
+```
+实际发生的是：
+```
+你的进程 → 网络 → 远程服务器 → 执行 → 返回结果
+```
+
+#### 核心组成
+##### Protocol Buffers（数据协议）
+Protocol Buffers是gRPC默认使用的序列化协议
+
+##### HTTP/2（传输层）
+HTTP/2是gRPC的底层协议
+
+为什么用HTTP/2：
+因为其支持
+- 多路复用（关键）：
+```
+一个 TCP 连接
+同时跑多个请求
+```
+- 双向流：
+```
+client ↔ server 可以同时发数据
+```
+- Header压缩：减少网络开销
+
+##### RPC框架本身
+负责：
+- 请求编码/解码
+- 连接管理
+- 超时/重试
+- 负载均衡
+
+#### gRPC调用流程（完整链路）
+1. client调用：`调用stub方法`
+2. 序列化：`protobuf → 二进制`
+3. 发送（HTTP/2）：`封装成 HTTP/2 frame`
+4. server接收：`解码 → 调用 handler`
+5. 执行业务逻辑：`你的 Go 函数`
+6. 返回结果：`序列化 → 网络 → client`
+
+#### 四种通信模式
+##### Unary（最常用）
+一问一答
+```proto
+rpc GetUser(Request) returns (Response)
+```
+
+##### Server Streaming
+```
+client 请求一次
+server 返回多个
+```
+
+##### Client Streaming
+```
+client 发多个
+server 返回一个
+```
+
+##### Bidirectional Streaming（最强）
+双方可以不断发数据
+```
+WebSocket，但更规范
+```
