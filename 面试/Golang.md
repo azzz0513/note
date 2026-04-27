@@ -2993,6 +2993,31 @@ for {
 ```
 如果QPS很高：`goroutine = QPS * 处理时间`
 
+#### goroutine爆炸的结果
+- 内存爆炸
+每个goroutine：初始栈 ≈ 2KB（可增长）
+假设：100万 goroutine 
+光栈就需要GB级别内存
+
+- 调度器压力暴增（GMP）
+M疯狂切换G
+导致：CPU大量资源用于调度
+
+- GC压力激增
+goroutine多 = 对象多，导致GC次数上升
+
+- 延迟飙升（P99崩）
+因为调度队列太长了，goroutine排队执行
+
+#### 如何防止goroutine爆炸
+- worker pool
+限制goroutine数量
+如：8核 → 8~32worker
+- channel限流
+buffered channel = 并发上限
+- context超时控制
+- 使用semaphore：带容量限制的并发控制
+
 ## 内存管理
 ### 内存管理模型
 ![[images/Pasted image 20251205103402.png]]
