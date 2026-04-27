@@ -1862,6 +1862,116 @@ if h.flags&hashWriting == 0 {
 h.flags |= hashWriting
 ```
 
+#### 原因
+==map会动态搬迁==
+当触发扩容时：old buckets → new buckets
+但是Go不会一次性搬完，而是渐进式迁移：在读写过程中，bucket是不断变化的
+
+#### 并发读写会发生的问题
+##### 并发写
+```Go
+go func() { m["a"] = 1 }()
+go func() { m["b"] = 2 }()
+```
+- 数据结构损坏：哈希冲突导致结构错乱
+- 内存覆盖：一个写操作覆盖另一个写操作
+- runtime panic：fatal error: concurrent map writes
+
+###### 为什么并发写会把bucket搞坏
+写map并不是一步原子的，是很多步，且全都不是原子操作
+如：
+```Go
+m["a"] = 1
+```
+底层大概：
+```
+1. hash(key)
+2. 找 bucket
+3. 检查 slot 是否存在
+4. 不存在 → 找空位
+5. 没空位 → 创建 overflow
+6. 写 key
+7. 写 value
+8. 更新 count
+9. 判断是否扩容
+10. 可能触发 grow
+```
+
+并发写就可能导致同一个bucket被同时修改
+如：
+```Go
+go m["a"] = 1
+go m["b"] = 2
+```
+a，b可能同时哈希到同一个bucket
+
+goroutineA：
+```
+发现 slot[3] 空
+准备写进去
+```
+
+goroutineB：
+```
+也发现 slot[3] 空
+也准备写进去
+```
+
+结果就导致：
+```
+互相覆盖
+count 错乱
+甚至key/value半写入状态
+```
+这就是数据结构损坏
+
+###### 为什么overflow会断裂
+bucket满了：需要创建新的overflow bucket
+
+goroutineA：
+```
+创建 overflow1
+bucket.overflow = overflow1
+```
+
+goroutineB：
+```
+创建 overflow2
+bucket.overflow = overflow2
+```
+
+结果：
+谁后写就谁覆盖前者
+导致其中一个丢失，数据丢失
+
+##### 一读一写
+```Go
+go func() { m["a"] = 1 }()
+go func() { fmt.Println(m["a"]) }()
+```
+- 读到旧数据
+- 读到空值
+- panic
+
+##### 并发读+扩容
+```Go
+多个 goroutine 同时读 map
+同时发生扩容
+```
+可能导致：
+```
+nil pointer dereference
+hash 冲突异常
+bucket 状态不一致
+```
+
+#### 为什么map不设计成并发安全的
+- 性能代价太高：如果map使用内置锁，每次读写都加锁
+	- 结果：
+		- 性能大幅下降
+		- 读操作也被阻塞
+- map使用非常频繁：如果默认加锁，整个语言的性能会下降
+
 ### ==如何实现并发安全的map==
 - 使用读写锁`sync.RWMutex`：通过结构体将`map`和`sync.RWMutex`封装在一起，读操作加读锁（RLock），写操作加写锁（Lock）
 例：
@@ -1961,15 +2071,15 @@ Map的key必须要可比较
 
 ### ==Map的扩容时机==
 向map中插入新key的时候，会进行条件检测，符合下面2个条件，就会触发扩容：
-- 装载因子超过阈值，源码里定义的阈值为6.5，这个时候会触发双倍扩容
-- overflow的bucket数量过多：
+- 装载因子超过阈值（count/bucket数量，平均每个bucket的元素数），源码里定义的阈值为6.5，这个时候会触发双倍扩容
+- overflow的bucket数量过多（哈希分布差）：
 	- 当B小于15时，也就是bucket总数2^B小于2^15时，如果overflow的bucket数量超过2^B 
 	- 当B>=15，也就是bucket总数2^B大于等于2^15，如果overflow的bucket数量超过2^15 
 	- 在这两种情况下会触发等量扩容
 
 ### ==Map的扩容过程==
 Go的map的扩容是渐进式的。它不会在触发扩容时“stop the world”来一次性把所有数据搬迁到新空间，而是只分配新空间，然后在后续的每一次插入、修改或删除操作时，才会顺便搬迁一两个旧桶的数据。这种设计将庞大的扩容成本分摊到了多次操作中，极大减少了服务的瞬间延迟（STW），保证了性能的平滑性。
-如果是触发双倍扩容，会新建一个buckets数组，新的buckets数量大小是原来的2倍，然后旧buckets数据搬迁到新的buckets。如果是等量扩容，buckets数量维持不变，重新做一遍类似双倍扩容的搬迁动作，把松散的键值对重新排列一次，使得同一个buckets中的key排列地更紧密，这样节省空间，存取效率更高
+如果是触发双倍扩容，会新建一个buckets数组，新的buckets数量大小是原来的2倍，然后旧buckets数据搬迁到新的buckets。如果是等量扩容，==buckets数量维持不变==，重新做一遍类似双倍扩容的搬迁动作，把松散的键值对重新排列一次，使得同一个buckets中的key排列地更紧密，这样节省空间，存取效率更高
 
 ### 扩容时发生读写怎么办
 | 操作     | 处理逻辑                            |
