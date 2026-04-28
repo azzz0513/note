@@ -2289,6 +2289,46 @@ nevacuate 在往后移动时，并不是死板地每次只 +1。
 在底层代码的 advanceEvacuationMark 函数中，当搬运完 nevacuate 指向的桶后，它会往后寻找下一个**尚未被搬运**的桶：  
 如果它发现后面的桶（比如 nevacuate + 1、nevacuate + 2）因为用户的“目标桶”操作，**提前被搬走了**，nevacuate 会聪明地直接跳过它们，直到找到第一个还没搬走的旧桶，或者走到尽头。并且为了防止单次寻找耗时过长，最多只往后探查 1024 个桶。
 
+#### 迁移标记并不靠nevacuate--靠tophash复用
+很多人误以为 `nevacuate` 是"标记已迁移的指针"，其实不是。  
+迁移状态是写在每个 bucket 自己身上的，写在 `tophash` 数组里。
+```Go
+type bmap struct {
+    tophash [bucketCnt]uint8   // bucketCnt = 8
+    // 后面紧跟 keys[8], values[8], overflow*
+}
+```
+`tophash[i]` 正常情况下存的是 key hash 的高 8 位，但 runtime 把值很小的几个数保留为状态标记：
+```Go
+// 见 runtime/map.go
+const (
+    emptyRest      = 0  // 此槽空，且后续槽全空（探测可提前终止）
+    emptyOne       = 1  // 此槽空，但后续可能有值
+    evacuatedX     = 2  // 已迁移到新桶的"X 部分"（前半段）
+    evacuatedY     = 3  // 已迁移到新桶的"Y 部分"（后半段）
+    evacuatedEmpty = 4  // 空槽，且整个 bucket 已被迁移过
+    minTopHash     = 5  // 正常 tophash 的最小值
+)
+```
+也就是说：
+
+| `tophash[0]` 的值      | 含义                       |
+| -------------------- | ------------------------ |
+| `evacuatedX` (2)     | 这个旧桶已迁移，元素在新 buckets 前半段 |
+| `evacuatedY` (3)     | 这个旧桶已迁移，元素在新 buckets 后半段 |
+| `evacuatedEmpty` (4) | 桶整体被迁移，但本来就空             |
+| `≥ minTopHash` (5)   | 还没迁移，正常使用                |
+
+旧实现扩容时容量翻倍：`2^(B-1) → 2^B`。  
+一个旧桶 `i` 里的 8 个 key，会按 hash 的新增那一位（第 `B-1` 位）分流：
+- 该位 = 0 → 进入新桶 `i`（X 部分，前半段）
+- 该位 = 1 → 进入新桶 `i + 2^(B-1)`（Y 部分，后半段）
+
+所以一个旧桶迁移完之后，要在 `tophash[0]` 写明它的元素去了 X 还是 Y，这样在迁移完成前如果有读写，可以快速重定向到正确的新桶。
+
+注意：一个旧桶迁移完，可能产生两个新桶（X 和 Y 各一个），并不是简单的"一对一搬家"。
+
+
 ### Swiss Map扩容过程
 #### 同尺寸rehash（清墓碑）
 最简单的一种，不扩容、不分裂，只是把所有 deleted 槽（tombstone, `0xFE`）清成 empty（`0x80`）。
@@ -2341,7 +2381,6 @@ split 后：
 key 怎么分？看新增的那一位 hash bit（第 localDepth+1 位）：
 - 该位 = 0 → 进 A0
 - 该位 = 1 → 进 A1
-
 总元素数没变，但同样的 capacity 现在分给两个 table，每个 table 实际只装一半 → growthLeft 大幅恢复。
 
 ###### 情况 B：`localDepth == globalDepth` —— 先把 directory 翻倍
@@ -2383,17 +2422,6 @@ type smallMap struct {
 - **第一步**：检测到 map 正在扩容。
 - **第二步**：**强制触发一次渐进式迁移（growWork）**。确保当前 key 所在的旧桶被优先搬运到新桶中。
 - **第三步**：因为第二步保证了当前操作的 key 所属的旧桶已经被搬空了，所以接下来的**写入或删除操作，绝对只在新的 buckets 中进行**。
-
-#### Swiss map
-**扩容不再是一个“持续状态”，而是一个“瞬间动作”。**
-1. **没有中间状态**：触发扩容的那个写操作，必须等整个 map 100% 搬迁完毕后，才会返回。
-2. **读操作 (mapaccess)**：
-    - 要么在扩容前发生，读的是旧数组。
-    - 要么在扩容完成后发生，读的是新数组。
-    - **读操作的代码被大幅简化**，不需要再去判断 oldbuckets 是否存在，也不用判断数据是否搬迁完，直接一套逻辑查到底，速度极快。
-3. **写/删除操作**：同样，不需要像以前那样“被迫顺手搬运 2 个桶”（没有 growWork 函数了），直接在当前的有效数组上操作即可。
-
-(注：和旧版一样，如果用户不加锁进行并发读写，底层依然有 hashWriting 标志位检测，一旦发现并发依然会 panic: concurrent map read and map write。)
 
 ### 可以对Map的元素取地址吗
 无法对map的key或value取址。会发生编译报错，这样设计是因为map一旦发生扩容，key和value的位置就会改变，之前保存的地址就会失效
