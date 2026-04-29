@@ -991,7 +991,6 @@ SELECT name, age, department FROM employees WHERE name = 'John';
 #### IM项目
 对于IM项目也会有类似好友列表、群聊列表这样的业务，这些业务也是访问量比较大，然后数据库IO也是会比较频繁的，所以也可以创建一些覆盖索引来提升数据库IO的效率
 
-
 ### 如果一个列既是单列索引，又是联合索引，单独查它的话先走哪个？
 mysql 优化器会分析每个索引的查询成本，然后选择成本最低的方案来执行 sql。
 
@@ -1056,9 +1055,7 @@ InnoDB 的表数据本身就是按 B+ 树组织的，这棵树叫**聚簇索引*
     - 重复“场景一”的所有步骤：根节点 -> 分支节点 -> 主键叶子节点。
 4. **获取数据**：
     - 在聚簇索引叶子节点拿到完整的行数据（因为 SELECT * 需要所有列）。
-
 **耗时**：走两棵树。先走 age 树拿到 ID，再走 id 树拿到数据。效率比主键查询低。
-
 **耗时**：约 3 次 I/O（如果根节点常驻内存，实际可能只有 1-2 次物理 I/O）。
 
 ####  场景三：覆盖索引优化 (Covering Index)
@@ -1166,7 +1163,6 @@ SELECT id, user_id, create_time, state
 CREATE INDEX idx_user_time_cover 
 ON order(user_id, create_time, state, id);
 ```
-
 
 ## 事务
 
