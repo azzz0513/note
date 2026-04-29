@@ -482,7 +482,6 @@ Redis 的 I/O 多路复用模式使用的是 Reactor 设置模式的方式来实
 ### Redis的网络模型是怎样的？
 Redis 6.0 版本之前，是用的是单Reactor单线程的模式
 ![img](https://cdn.xiaolincoding.com//picgo/1721630566038-d16ec13e-e7e6-4e0b-a48c-e7affdbf312e.png)
-
 单 Reactor 单进程的方案因为全部工作都在同一个进程内完成，所以实现起来比较简单，不需要考虑进程间通信，也不用担心多进程竞争。
 
 但是，这种方案存在 2 个缺点：
