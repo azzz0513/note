@@ -217,6 +217,60 @@ Go中所有变量都有零值：
 |chan|nil|
 |interface|nil|
 |struct|每个字段的零值|
+
+#### 可以直接使用的变量（值类型）
+这类变量的零值是有意义的默认值，并且已经分配了内存，可以直接进行读写操作。
+- **基础数据类型**：int (0), float (0.0), bool (false), string ("")
+```GO
+    var i int
+    i++ // 正常运行，i 变成 1
+    
+    var s string
+    s = s + "hello" // 正常运行，s 变成 "hello"
+```
+
+- **数组（Array）**：注意是定长数组，不是切片。
+    ```GO
+    var arr [3]int
+    arr[0] = 1 // 正常运行，底层已经分配了 3 个 int 的连续内存
+    ```
+
+- **结构体（Struct）**：
+    ```Go
+    type User struct { Name string; Age int }
+    var u User
+    u.Name = "Alice" // 正常运行，结构体内的字段都被初始化为了各自的零值
+    ```
+
+#### 不能直接使用的变量（引用类型，需初始化）
+这类类型的零值是 **nil**。nil 表示它还没有指向任何有效的内存地址。如果直接对它们进行写入或解引用操作，会引发 **panic（运行时恐慌）**。它们必须通过 make()、new() 或字面量进行初始化后才能使用。
+
+- **字典（Map）**：
+    ```Go
+    var m map[string]int
+    // m["key"] = 1 // ❌ 报错：panic: assignment to entry in nil map
+    // 正确做法：
+    m = make(map[string]int)
+    m["key"] = 1
+    ```
+
+- **指针（Pointer）**：
+    ```Go
+    var p *int
+    // *p = 10 // ❌ 报错：panic: invalid memory address or nil pointer dereference
+    // 正确做法：
+    p = new(int)
+    *p = 10
+    ```
+
+- **通道（Channel）**：
+    ```GO
+    var ch chan int
+    // ch <- 1 // ❌ 报错：导致死锁 (fatal error: all goroutines are asleep - deadlock!)
+    // 正确做法：
+    ch = make(chan int)
+    ```
+
 #### slice的var会发生什么？
 例如：`var s []int`
 此时：`fmt.Println(s)`
@@ -249,8 +303,113 @@ cap = 0
 一个 nil slice
 ```
 
-一个nil slice可以zhi
+一个nil slice可以直接使用，所以slice通常不需要手动初始化
+```Go
+var s []int
 
+s = append(s, 1)
+s = append(s, 2)
+```
+
+##### 什么时候需要make
+例如：
+```Go
+s := make([]int, 10)
+```
+直接创建底层数组
+得到：`len = 10 cap = 10`
+而`var s []int`
+只是`nil slice`，还没有数组
+
+#### map需要进行初始化
+例如：
+```Go
+var m map[string]int
+```
+此时：`m == nil`是true
+但是：`m["a"] = 1`会直接panic
+
+##### 为什么slice能append，而map不行
+因为append是函数
+```Go
+append(s, 1)
+```
+会返回新slice，内存会帮你分配内存
+
+而map赋值是运行时操作
+```Go
+m["a"] = 1
+```
+要求：map哈希表已经存在
+nil map：底层哈希表不存在，所以会panic
+
+#### struct
+例如：
+```Go
+type User struct {
+    Name string
+    Age  int
+}
+```
+假如：
+```Go
+var u User
+```
+会得到：
+```Go
+User{
+    Name: "",
+    Age: 0,
+}
+```
+不是nil，因为struct不是值类型
+
+==但是struct指针会nil==
+```Go
+var u *User
+```
+此时：
+```Go
+u == nil
+```
+这是指针，不是struct本身
+
+#### new和make的区别
+new(T)：
+- 分配零值对象
+- 返回指针
+
+例如：
+```Go
+u := new(User)
+```
+等价于：
+```Go
+u := &User{}
+```
+
+make()：
+专门用于slice、map、chan
+因为这些类型底层有运行时结构
+
+### nil slice和empty slice的区别
+```Go
+var s1 []int
+s2 := []int{}
+```
+s1是nil slice
+s2是empty slice，不是nil
+
+区别：
+```Go
+s1 == nil // true
+s2 == nil // false
+```
+但是：
+```GO
+len 都是0
+cap 都是0
+```
 
 ### ==数组和切片的区别==
 - 数组：数组固定长度。数组长度是数组类型的一部分，数组需要指定大小，不指定也会根据初始化，自动推算出大小，数组大小不可改变。数组是通过值传递的。
