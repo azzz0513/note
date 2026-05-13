@@ -4117,7 +4117,6 @@ sentinel monitor <master-name> <ip> <redis-port> <quorum>
 
 正是通过 Redis 的发布者/订阅者机制，哨兵之间可以相互感知，然后组成集群，同时，哨兵又通过 INFO 命令，在主节点里获得了所有从节点连接信息，于是就能和从节点建立连接，并进行监控了。
 
-
 ### Gozero中如何支持哨兵模式
 需要将Redis的Host字段填入所有的哨兵地址：
 ```yaml
