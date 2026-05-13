@@ -1273,7 +1273,6 @@ MySQL服务端是允许多个客户端连接的，这意味着MySQL会出现同�
 2. **结果**：B **能看到**（或能操作）A 提交的最新数据。
 3. **原因**：这属于 **“当前读”（Current Read）**。在进行加锁操作（写操作或加锁读）时，数据库必须读取**最新的**已提交版本，否则会导致更新丢失或数据不一致。
 
-
 ### 举例说明可重复读下的幻读问题
 我举例一个可重复读隔离级别发生幻读现象的场景。以这张表作为例子：
 ![img](https://cdn.xiaolincoding.com//picgo/1717913623026-b457c2fd-d09d-4cd7-940a-eec8f2478e79.png)
@@ -1686,7 +1685,6 @@ CREATE INDEX idx_year ON t ((YEAR(date)));
 ALTER TABLE t 
 ADD year_col INT GENERATED ALWAYS AS (YEAR(date));
 ```
-
 
 ### explain
 |列名|含义|关键解读|
