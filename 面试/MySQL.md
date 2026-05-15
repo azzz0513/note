@@ -116,11 +116,26 @@ HAVING
     分组后条件列表
 SELECT
     字段列表
+DISTINCT
+	去重
 ORDER BY
     排序字段列表
 LIMIT
     分页参数
 ```
+
+### 为什么select不能用别名出现在where
+例如：
+```SQL
+SELECT salary * 12 AS annual_salary
+FROM employee
+WHERE annual_salary > 100000;
+```
+会报错。
+因为：逻辑执行顺序：WHERE先于SELECT
+此时：annual_salary还不存在
+
+
 
 ### `select * from t where date_time < xxx limit 300000, 5`会回表多少次
 会回表300005次
@@ -157,6 +172,126 @@ WHERE id IN (
 
 为什么这么优化：
 子查询中`select id`只需要二级索引叶子节点，因为`(date_time, id)`已经覆盖了，也就是覆盖索引，于是前300005条不需要进行回表，只对最后5条id进行回表
+
+### 使用聚合函数要注意的地方
+常见的聚合函数：
+```SQL
+COUNT()
+SUM()
+AVG()
+MAX()
+MIN()
+GROUP_CONCAT()
+```
+聚合函数的核心特点是：不是对单行数据操作，而是对一组数据操作
+
+#### `count(*)`和`count(字段)`的区别
+- `count(*)`：
+```SQL
+SELECT COUNT(*) FROM user;
+```
+含义：统计行数，不关心字段是否为NULL
+
+- `count(col)`：
+```SQL
+SELECT COUNT(phone) FROM user;
+```
+含义：统计phont非NULL的数量，NULL不算
+
+#### `sum`和`avg`
+`SUM(score)`和`AVG(score)`会直接跳过NULL值
+假设有三行数据，score分别是`10, 20, NULL`。`AVG(score)`的结果是15`((10+20)/2)`，而不是10`((10+20)/3)`
+如果希望NULL被当作0来计算平均值，需要使用`IFNULL`：`AVG(IFNULL(score, 0))`
+
+#### `count(*)`为什么慢？
+- 与 MyISAM（直接存储了表的总行数）不同，InnoDB 引擎在执行 `SELECT COUNT(*) FROM table` 时，由于 MVCC（多版本并发控制）的原因，必须扫描索引来计算行数。在千万级大表中这会非常慢。
+- 优化建议：尽量让聚合函数走索引。例如 `COUNT(*) `优化器会自动选择最小的二级索引进行扫描。如果业务允许一定的延迟，大表的总行数可以考虑缓存到 Redis 中。
+
+#### `group by`为什么容易慢
+例如：
+```SQL
+SELECT status, COUNT(*)FROM ordersGROUP BY status;
+```
+核心问题：
+MySQL 必须把相同status聚合到一起
+
+通常有两种方式：
+- using temporary：临时表聚合
+- using filesort：排序后聚合
+
+#### select非聚合字段
+例如：
+```SQL
+select name, count(*)
+from user;
+```
+这是有问题的，因为name不知道取哪一行
+
+MySQL老版本中会随便返回一个name，这是很危险的
+
+现代MySQL，默认`ONLY_FULL_GROUP_BY`开启后会报错，除了聚合函数外，所有的列都必须出现在`group by`子句中
+错误示例：
+```SQL
+-- 报错：department_name 没有在 GROUP BY 中
+SELECT department_id, department_name, SUM(salary) 
+FROM employees 
+GROUP BY department_id;
+```
+正确做法：
+```SQL
+SELECT department_id, department_name, SUM(salary) 
+FROM employees 
+GROUP BY department_id, department_name;
+```
+
+#### where和having的区别
+不要在where子句中使用聚合函数，这是极其常见的语法错误
+
+- where：在数据聚合前进行过滤，作用于单行数据，不能包含聚合函数
+- having：在数据聚合后进行过滤，专门用来过滤聚合函数的结果
+
+#### 空结果集（Empty Set）的返回值
+当查询没有匹配到任何行时，聚合函数的返回值会让人感到意外：
+- COUNT() 会返回 **0**。
+- SUM(), AVG(), MAX(), MIN() 会返回 **NULL**。
+- 陷阱：如果你的代码逻辑期望 SUM 返回数字类型，遇到 NULL 可能会导致程序（如Java/Python）抛出空指针异常。
+- 解决：使用 COALESCE 或 IFNULL 给定默认值：
+```SQL
+SELECT COALESCE(SUM(salary), 0) FROM employees WHERE dept_id = 999; -- 部门不存在时返回0
+```
+
+
+
+#### 聚合查询优化核心
+##### 减少扫描行数
+例如：
+- 更好索引
+- 分区
+- 预聚合
+
+##### 利用索引有序性
+避免：
+```
+temporary
+filesort
+```
+
+##### 避免函数操作索引列
+例如：
+```SQL
+YEAR(create_time)
+DATE(create_time)
+```
+
+##### 尽量覆盖索引
+例如：
+```SQL
+SELECT user_id, COUNT(*)
+FROM orders
+GROUP BY user_id;
+```
+如果`index(user_id)`，可能直接`using index`不用回表
+
 
 ### SQL注入
 SQL注入是一种非常经典且危险的Web安全漏洞

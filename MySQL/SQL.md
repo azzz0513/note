@@ -87,7 +87,7 @@ GEOMETRY, POINT, LINESTRING, POLYGON, MULTIPOINT, MULTILINESTRING, MULTIPOLYGON,
 ```SQL
 CREATE TABLE 表名(
     字段1 字段1类型[COMMENT 字段1注释],
-    字段2 字段2类型[COMMENT 字段2注释],
+	    字段2 字段2类型[COMMENT 字段2注释],
     字段3 字段3类型[COMMENT 字段3注释],
     ...
     字段n 字段n类型[COMMENT 字段n注释]
