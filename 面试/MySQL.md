@@ -106,6 +106,8 @@ LIMIT
 ```SQL
 FROM
     表名列表
+JOIN
+	如果有关联，会先做表关联
 WHERE
     条件列表
 GROUP BY
@@ -129,7 +131,32 @@ LIMIT
 所以流程为：
 1. 扫描二级索引300005次
 2. 回表300005次
-3. 
+3. 丢弃前300000条
+4. 返回最后5条
+
+#### 解决方案
+- 延迟关联（子查询覆盖索引）
+原SQL：
+```SQL
+SELECT *
+FROM t
+WHERE date_time < xxx
+LIMIT 300000,5;
+```
+优化：
+```SQL
+SELECT *
+FROM t
+WHERE id IN (
+    SELECT id
+    FROM t
+    WHERE date_time < xxx
+    LIMIT 300000,5
+);
+```
+
+为什么这么优化：
+子查询中`select id`只需要二级索引叶子节点，因为`(date_time, id)`已经覆盖了，也就是覆盖索引，于是前300005条不需要进行回表，只对最后5条id进行回表
 
 ### SQL注入
 SQL注入是一种非常经典且危险的Web安全漏洞
