@@ -3128,6 +3128,18 @@ GMP含义：
 调度逻辑是这样的，M必须绑定P才能执行G。每个P维护一个自己的本地G队列（长度256），M从P的本地列取G执行。当本地列为空时，M会按优先级从全局队列、网络轮询器、其他P队列中窃取goroutine，这是work-stealing机制
 ![[images/Pasted image 20251127214546.png]]
 
+### GMP和操作系统关系
+- G（Goroutine）：
+	- 纯粹的用户级线程（User-Level Thread，或者叫协程）
+	- 完全由GO语言的Runtime（运行时）在用户态进行创建、销毁和调度，操作系统内核对G一无所知
+- M（Machine）：
+	- 内核级线程（KLT）
+	- 由操作系统内核管理和调度。GO程序在启动时，会通过系统调用（比如Linux下的`clone()`）向操作系统申请创建这些M
+	- 运行状态：M既可以在用户态执行你写的Go代码，当碰到读写文件等系统调用时，它会陷入内核态
+- P（Processor）：
+	- 本地逻辑处理器
+	- M想要执行G，必须先绑定一个P。P里面维护了一个本地的G队列
+
 ### 什么是Go scheduler
 Go scheduler就是Go运行时的协程调度器，负责在系统线程上调度执行goroutine。它是Go runtime的一部分，它内嵌在Go程序中，和Go程序一起运行。它的主要工作是决定哪个goroutine在哪个线程上运行，以及何时进行上下文切换。scheduler的核心是`schedule()`函数，它在无限循环中寻找可运行的goroutine。当找到后通过`execute()`函数切换到goroutine执行，goroutine主动让出或被抢占时再回到调度循环。
 
