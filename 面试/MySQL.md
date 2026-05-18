@@ -135,8 +135,6 @@ WHERE annual_salary > 100000;
 因为：逻辑执行顺序：WHERE先于SELECT
 此时：annual_salary还不存在
 
-
-
 ### `select * from t where date_time < xxx limit 300000, 5`会回表多少次
 会回表300005次
 
@@ -210,7 +208,9 @@ SELECT COUNT(phone) FROM user;
 #### `group by`为什么容易慢
 例如：
 ```SQL
-SELECT status, COUNT(*)FROM ordersGROUP BY status;
+SELECT status, COUNT(*) 
+FROM orders
+GROUP BY status;
 ```
 核心问题：
 MySQL 必须把相同status聚合到一起
@@ -246,7 +246,6 @@ GROUP BY department_id, department_name;
 
 #### where和having的区别
 不要在where子句中使用聚合函数，这是极其常见的语法错误
-
 - where：在数据聚合前进行过滤，作用于单行数据，不能包含聚合函数
 - having：在数据聚合后进行过滤，专门用来过滤聚合函数的结果
 
@@ -259,8 +258,6 @@ GROUP BY department_id, department_name;
 ```SQL
 SELECT COALESCE(SUM(salary), 0) FROM employees WHERE dept_id = 999; -- 部门不存在时返回0
 ```
-
-
 
 #### 聚合查询优化核心
 ##### 减少扫描行数
@@ -291,7 +288,6 @@ FROM orders
 GROUP BY user_id;
 ```
 如果`index(user_id)`，可能直接`using index`不用回表
-
 
 ### SQL注入
 SQL注入是一种非常经典且危险的Web安全漏洞
