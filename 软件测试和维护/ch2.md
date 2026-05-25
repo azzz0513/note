@@ -58,3 +58,75 @@
 
 #### 极限编程的价值
 ![[images/Pasted image 20260525182437.png]]
+
+##### Communication
+- XP programmers communicate with their customers and fellow programmers
+沟通：
+极限编程的程序员与他们的客户和其他程序员交流
+
+##### Simplicity
+- they keep their design simple and clean
+简单：
+他们保持设计简单干净
+
+##### Feedback
+- Get feedback by software testing from the start
+反馈： 
+从一开始就通过软件测试获得反馈
+
+##### Courage
+- Deliver the system to customers as early as possible 
+- Implement changes as suggested, responding with courage to changing requirements
+勇气：
+尽早将系统交付给客户 
+按照建议实施变更，勇于响应不断变化的需求
+
+#### 极限编程的软件测试
+##### 生命周期测试
+软件生命周期的测试：
+- 左移测试：在需求阶段过程中开始测试，和开发相互平行
+- 持续测试：将测试集成到每一个迭代上，从而保证每一次增量发布的质量稳步提升
+
+##### ==TDD==
+定义：TDD（Test-Driven Development）测试驱动开发
+- 先写测试——然后编译——接下来跑测试——写代码——跑测试——测试通过再重构
+- 在编码之前写测试用例：帮助开发者思考接口设计以及边界条件
+- 先书写单元测试——然后开发代码去通过测试——最后重构代码
+- 通过测试定义需求去保证代码符合预期并且保持可维护性
+  开始 —— 编写测试 —— 编译 —— 修复编译错误 —— 运行代码观察其失败 —— 编写代码 —— 运行代码观察其通过 —— 根据需求重构代码 —— 重复编写测试
+![[images/Pasted image 20260525195436.png]]
+
+###### 实现细节
+- 仅在自动化测试失败时编写代码
+- 如果你通过其他方式找到bug，先写一个失败的测试，然后修复bug
+	- Bug以后不会重新出现
+- 尽可能经常地运行测试，理想情况下每次更改代码时都要运行测试
+	- 拥有全面的单元测试可以让您自信地重构代码
+	- 没有单元测试，代码很脆弱——更改可能会破坏客户端
+
+###### 好处
+- 单元测试实际上被编写了
+- 程序员的满意能让测试用例编写变得更有持续性
+- 让接口和行为的细节更加清晰
+- 可证明、可重复、自动化的验证
+- 为程序员提供重构的自信
+
+###### 验收测试
+- **Acceptance Testing Aligned with User Stories**
+Define acceptance criteria for each user story, with tests designed around these criteria.
+
+- 与用户故事对齐验收测试
+为每个用户故事定义验收标准，并围绕这些标准设计测试。
+
+###### CI（持续集成）
+- **Continuous Feedback and Improvement**
+Use daily builds and continuous integration (CI 持续集成) to automate tests
+
+- 持续反馈和改进
+使用每日构建和持续集成（CI持续集成）来自动化测试
+
+###### 测试金字塔
+- Automation as the Backbone
+测试金字塔（自顶向下）UI 测试 → 集成测试 → 单元测试
+![[images/Pasted image 20260525200220.png]]
+
