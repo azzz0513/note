@@ -30,3 +30,16 @@
 通过 **标记每一个阶段的生命周期以及测试活动** 来强调 Verification & Validation
 一旦编码完成，测试就随之开始了
 **从单元测试开始，然后测试层级逐步提高 ，直到验收测试完成。**
+![[images/Pasted image 20260525162636.png]]
+
+| 优势  | 1. It is simple and **easy to manage** due to the rigidity of the model. （由于模型的刚性，它简单易管理）<br>    <br>2. It encourages **verification and validation** at all phases. （它鼓励在所有阶段进行验证和校验）<br>    <br>3. Each phase has specific deliverables and a review process. （每个阶段都有**特定的可交付成果和审查流程**）<br>    <br>4. It gives **equal weight to testing** alongside development rather than treating it as an afterthought at the end.（它将**测试与开发同等重视**，而不是在最后将其视为事后的想法） |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 不足  | 1. Like the Waterfall model , there is no working **software** produced until **late** during the life cycle.（和瀑布模型一样，直到生命周期后期才生产出工作软件）<br>    <br>2. It is **unsuitable** where the requirements are at a moderate to **high risk of changing**. （不适合需求处于中度到高度变更风险的情况。）<br>    <br>3. The tight link between test, debug and change tasks during the test phase is not clear.（测试阶段的测试、DEBUG 和变更任务是不清晰的）                                                   |
+
+### W Model
+![[images/Pasted image 20260525163024.png]]
+别名：V 模型拓展 / 双 V 模型
+测试并不是在编码完成后进行的，而是和开发过程**平行（PARALLEL）**
+强调开发和测试的协作 **（CO-OPERATION）** 
+测试不只是构建，还包括执行和评估
+
