@@ -8,23 +8,9 @@
 
 先用一个curl命令直观感受API的请求和响应。可以在终端里直接跑这条命令（把`$ANTHROPIC_API_KEY`更换为你自己的真实Key）：
 ```Bash
-curl -v https://api.deepseek.com/anthropic ^
-	-H 'Content-Type: application/json' ^
-	-H 'anthropic-version: 2023-06-01' ^
-	-H "x-api-key: <TOKEN>" ^
-	-d '{ 
-		"max_tokens": 1000, 
-		"model": "deepseek-v4-pro",
-		"messages": [
-			{
-				"role": "user",
-				"content": [
-					{
-						"type": "text",
-						"text": "hello, world!"
-					}
-				]
-			}
-		]
-	}'
+curl -v https://api.deepseek.com/anthropic/chat/completions ^
+  -H "Content-Type: application/json" ^
+  -H "anthropic-version: 2023-06-01" ^
+  -H "x-api-key: sk-xxxxxxxx" ^
+  -d "{\"max_tokens\":1000,\"model\":\"deepseek-v4-pro\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hello, world!\"}]}]}"
 ```
