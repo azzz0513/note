@@ -9,12 +9,12 @@
 先用一个curl命令直观感受API的请求和响应。可以在终端里直接跑这条命令（把`$ANTHROPIC_API_KEY`更换为你自己的真实Key）：
 ```Bash
 curl https://api.deepseek.com/anthropic \
-	-H 'Content-Type': application/json \
-	-H "X-API-Key: sk-f46afd404a544f5486619ba65249d1d0" \
+	-H 'Content-Type: application/json' \
+	-H "X-API-Key: <TOKEN>" \
 	-d '{
 		"max_tokens": 1000,
 		"model": "deepseek-v4-pro",
-		"message": [
+		"messages": [
 		{
 			"role": "user",
 			"content": [
