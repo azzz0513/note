@@ -20,4 +20,29 @@ Agent？你给它一个目标，它自己想办法完成，过程中它可能需
 为什么要分层？因为每层只管自己的事，互不干扰。交互层不需要直到LLM怎么调用，工具层不需要关心界面怎么渲染，安全层贯穿所有操作但不干预具体逻辑。每一层只做自己的事，通过接口跟其他层通信。
 
 ## Claude Code安装和配置
-1. 
+安装：
+先去Claude Code官网
+> https://code.claude.com/docs/en/overview
+
+找到相应系统的安装命令
+推荐下载好node.js后，使用`npm install -g @anthropic-ai/claude-code`进行安装
+
+然后安装CC-Switch
+Github搜索CC-Switch进行安装
+![[images/Pasted image 20260606100131.png]]
+
+命令行输入`claude`可打开Claude Code，首次进入会需要登录，且国内不可用
+可以修改配置文件，配置文件位置`"C:\Users\你的用户\.claude.json"`
+新增：
+![[images/Pasted image 20260606100347.png]]
+
+配置自己的模型
+以DeepSeek为例，从DeepSeek开放平台获取API Key并复制，打开下载好的CC-Switch。
+![[images/Pasted image 20260606100737.png]]
+点击图中位置进行添加
+选择预设供应商为DeepSeek，复制API Key，并选择指定的模型，完成
+再次打开命令行，输入`claude`打开Claude Code
+![[images/Pasted image 20260606100941.png]]
+选择相信该文件夹
+![[images/Pasted image 20260606101011.png]]
+即安装并配置好模型
