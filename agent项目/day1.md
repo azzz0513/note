@@ -149,4 +149,66 @@ Claude支持Extended Thinking，让模型在正式回复之前先进行一轮内
 
 封装层干的事说白了就是翻译：往外发请求的时候，把你的统一类型翻译成对应供应商的格式。收到响应的时候，再翻译回来。
 
+用伪代码来说就是这样：
+```Go
+// 你自己定义的类型（上层代码只用这些）
+type Message struct {
+	role
+	content
+}
+type StreamEvent struct {
+	type
+	text
+	usage
+	error
+}
+type Usage struct {
+	inputTokens
+	outputTokens
+}
 
+type LLMClient struct {
+	protocol
+	model
+	baseURL
+	apiKey
+}
+
+func Constructor(protocol, model, baseURL, apiKey) *LLMClient 
+
+func (this *LLMClient) streamChat(systemPrompt, messages) []byte {
+	// 1. 把自定义Message转成对应供应商的格式
+	// 2. 调用对应的流式API
+	// 3. 把供应商的事件转成自定义StreamEvent
+	// 4. 通过异步流返回给调用方
+}
+```
+封装层内部怎么折腾是它自己的事，调用方完全不需要知道。从调用方的视角看，用起来就这么几行：
+```GO
+events := client.streamChat(systemPrompt, messages)
+for _, event := range events {
+	if event.type == "text" {
+		fmt.Print(event.text)
+	} else if event.type == "done" {
+		fmt.Print(event.usage) // 显示token用量
+	} else if event.type == "error" {
+		handleError(event.error) // 处理错误
+	}
+}
+```
+
+## 从单轮到多轮
+到目前位置，我们讨论的都是单词API调用：发一个请求，拿一个回复，结束。
+
+但对于一个Coding Agent来说，多轮对话是基本能力。用户描述一个需求，Agent问几个澄清问题，然后开始执行。这个过程天然就是多轮的。
+
+没有上下文记忆的Agent，每次都要用户把需求从头说一遍，根本没法用。
+
+那么多轮对话时怎么实现的？
+每次调API，就把完整的对话历史发过去。
+
+Claude API没有什么会话ID让服务器记住之前的对话。每次你发请求，都要把从第一轮到最新一轮的所有消息打包发送。模型靠这些历史消息来理解上下文。
+
+每一轮请求都包含之前所有轮次的完整内容。你需要在客户端维护完整的消息列表，每次用户发消息、模型回复，都要记录下来。
+
+## 消息模型：两层设计
