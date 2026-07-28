@@ -5,11 +5,11 @@
 那怎么让它动手？答案是一个协作协议，我们叫它Function Calling（也叫Tool Use）。整个流程分四步：
 ### 告诉模型有哪些工具
 在调API的时候，通过`tools`参数告诉模型：`你现在有这些工具可以用`。每个工具都有名字、描述、参数格式。
-![[Pasted image 20260715213351.png]]
+![[images/Pasted image 20260715213351.png]]
 
 ### 模型决定调用工具
 当模型认为需要使用某个工具时，它会在回复中输出一个结构化的请求：我想调这个工具，参数是这些。
-![[Pasted image 20260715213457.png]]
+![[images/Pasted image 20260715213457.png]]
 注意两个细节：
 - 模型可以在同一条回复里既输出文本又请求调用工具，甚至同时请求调用多个工具
 - 每个`tool_use`都有一个唯一的`id`，后面返回结果的时候要用
@@ -17,7 +17,7 @@
 
 ### 你执行工具，把结果告诉模型
 你的代码拿到`tool_use`请求后，在本地执行对应的操作（比如读文件），然后把结果作为`tool_result`发回给模型：
-![[Pasted image 20260715213822.png]]
+![[images/Pasted image 20260715213822.png]]
 `tool_use_id`必须和上面的`id`对应。这样模型才知道这是哪个工具调用的结果。
 **`tool_result`是以`user`角色发送的。因为从对话协议的角度，工具执行是用户侧做的事情，结果是你反馈给模型的。模型只负责思考和决策，不负责执行。**
 
@@ -33,7 +33,7 @@
 工具描述的质量直接决定了模型的工具使用行为，包括什么时候调、调哪个、参数怎么传。
 
 因为模型在决定是否使用某个工具时，主要依据就是工具描述。如果描述不清楚，模型要么不知道什么时候该用这个工具，要么用错工具，要么传错参数。
-![[Pasted image 20260715215623.png]]
+![[images/Pasted image 20260715215623.png]]
 
 一个好的工具描述应该包含这些信息：
 
@@ -53,7 +53,7 @@
 还有：你需要把工具定义发给API（名称、描述、参数Schema），这些信息如果不在接口里，你就得在别的地方维护一份，很容易和实际实现不一致。
 
 所以一个生产级的工具接口应该包含这些能力：
-![[Pasted image 20260715220301.png]]
+![[images/Pasted image 20260715220301.png]]
 每个方法都有明确的职责。
 - `name`、`description`、`inputSchema`用来生成API请求里的工具定义
 - `isReadOnly`、`isDestructive`用来让权限系统自动判断是否需要用户确认
@@ -62,7 +62,7 @@
 - `validateInput`在执行前校验参数，该拒绝的早拒绝，别等到执行一半才报错。校验失败时，把错误信息包装成isError：true的ToolResult返回给模型，让模型能调整参数重试，而不是直接抛出程序异常中断整个Agent Loop
 
 ## 执行结果：错误也是有价值的信息
-![[Pasted image 20260715221314.png]]
+![[images/Pasted image 20260715221314.png]]
 这里有一个关键设计：`isError`字段
 
 当工具执行失败时，你把失败信息包装成一个`isError: true`的ToolResult返回给模型。
@@ -77,10 +77,10 @@
 ## 通用基础实现
 如果每个工具都从零实现一遍，代码会很重复。所以可以使用一个基础工具作为通用实现：
 伪代码：
-![[Pasted image 20260715222015.png]]
+![[images/Pasted image 20260715222015.png]]
 
 这样每个工具只需要写一个工厂函数，填入自己的名称、描述、Schema和执行函数就行了：
-![[Pasted image 20260715222052.png]]
+![[images/Pasted image 20260715222052.png]]
 
 
 ## 工具注册中心（Registry）
@@ -89,7 +89,7 @@
 注册中心的能力很直观：注册工具、按名称启用或禁用、获取单个或所有启用的工具。最关键的是一个`toAPIFormat`方法，它遍历所有启用的工具，把每个工具的名称、描述、参数Schema组装成Claude API要求的格式。每次调API前调用它，告诉模型当前可用的工具列表。
 
 注册中心支持条件启用，你可以根据配置灵活控制：
-![[Pasted image 20260715221124.png]]
+![[images/Pasted image 20260715221124.png]]
 
 ## 六个关键工具的设计全景
 一个典型的工作流是：Grep搜索关键词 → 发现目标文件 → ReadFile读取完整内容 → EditFile修改 → Bash编译测试
@@ -125,7 +125,7 @@
 在流式响应中，文本内容是一段一段的，你直接追加就行。但tool_use的输入参数也是一段一段到的，而且是JSON碎片。我们需要将碎片拼起来，最后解析成完整的JSON。
 
 流式事件的顺序是这样的：
-![[Pasted image 20260716212424.png]]
+![[images/Pasted image 20260716212424.png]]
 `content_block_start`告诉我们一个新的tool_use块开始了，给你id和name。然后一系列的`content_block_delta`给我们JSON的碎片。最后`content_block_stop`告诉这个块结束了。
 
 处理逻辑：
@@ -135,7 +135,7 @@
 
 ## 消息管道的变化
 工具调用引入了一种新的消息模式。之前的对话是简单的user → assistant → user → assistant交替。现在变成了：
-![[Pasted image 20260716212857.png]]
+![[images/Pasted image 20260716212857.png]]
 - `tool_result`是以user角色发送的。
 - 一条assistant消息可能包含text和tool_use两种内容块。
 - 如果模型在一次回复中请求了多个工具调用（比如ReadFile和Grep），所有tool_use块在同一条assistant消息里，所有tool_result在同一条user消息里，通过id配对
