@@ -35,7 +35,7 @@ Git Worktree 是 Git 2.5 引入的功能。一句话概括它做的事情：允�
 
 执行完这条命令后，你的文件系统里多了一个目录。这个目录里是 feature-a 分支的完整文件。原来的目录不受影响，还是 main 分支的文件。​
 
-两个目录完全独立。你可以同时在两个目录里改代码、编译、跑测试，互不干扰。但它们共享同一个 `.git` 仓库，所以版本历史是统一的。在一个 Worktree 里提交的 commit，在另一个 Worktree 里执行 `git log --all` 也能看到。​
+两个目录完全独立。你可以同时在两个目录里改代码、编译、跑测试，互不干扰。**但它们共享同一个 `.git` 仓库，所以版本历史是统一的**。在一个 Worktree 里提交的 commit，在另一个 Worktree 里执行 `git log --all` 也能看到。​
 
 **共享仓库，隔离文件**。 这正是我们需要的。​
 
@@ -116,7 +116,7 @@ Worktree 创建好了，怎么让 Agent 切进去工作？​
 ![[Pasted image 20260728231240.png]]
 注意里面没有 `chdir`，也没有清缓存。​
 
-后续 Agent 调用 Bash、Read、Write 这些工具时，工具自己从 `currentSession.WorktreePath` 取出路径，作为本次调用的 cwd 传给子进程或文件操作。进程 cwd 还在 `originalCwd`，每次工具调用是**显式声明"在 Worktree 里跑"**的。​
+后续 Agent 调用 Bash、Read、Write 这些工具时，工具自己从 `currentSession.WorktreePath` 取出路径，作为本次调用的 cwd 传给子进程或文件操作。进程 cwd 还在 `originalCwd`，每次工具调用是**显式声明"在 Worktree 里跑"** 的。​
 
 这种「记一笔位置 + 工具显式取」的模式比改全局状态更可控：​
 - 主 Agent 同时在调多个工具？没事，每次调用都从 session 单独取当前 worktree。​
