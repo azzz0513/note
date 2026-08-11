@@ -55,8 +55,8 @@ NoSQL指非关系型数据库，NoSQL数据库逻辑上提供了不同于二维�
 	- 索引可能由于查询条件中使用了函数操作、类型转换、LIKE语句的模糊匹配（非前缀匹配）等原因失效。
 	- 使用`EXPLAIN`或`EXPLAIN ANALYZE`等工具分析查询计划，观察是否存在全表扫描。
 - **查询复杂度过高**：
-	- 复杂的JOIN操作、子查询、GOURP BY、ORDER BY等可能导致查询效率低下
-	- 查看查询计划，尽量减少JOIN的数量和范围，优化优化JOIN条件和排序操作
+	- 复杂的JOIN操作、子查询、GROUP BY、ORDER BY等可能导致查询效率低下
+	- 查看查询计划，尽量减少JOIN的数量和范围，优化JOIN条件和排序操作
 - **锁争用**：
 	- 高并发场景下，大量的UPDATE、DELETE等写操作可能导致锁冲突，影响查询性能
 	- 使用`SHOW ENGINE INNODB STATUS;`等命令查看锁等待情况，优化事务隔离级别，减少锁粒度
@@ -514,10 +514,45 @@ SELECT * FROM users ORDER BY age ASC LIMIT 500000;
 - 第一条 update sql 的话（ id<10），锁住的范围是（-♾️，10）
 - 第二条 update sql 的话（id >15），锁住的范围是（15，+♾️）
 
+假设id：1、5、10、15、20
+事务A：
+```sql
+UPDATE t
+SET value=xxx
+WHERE id < 10;
+```
+它可能锁：
+```
+(-∞,1]
+(1,5]
+(5,10]
+```
+其不仅会锁1、5，还锁5到10之间的空隙，因为防止幻读
+
+假如：
+事务A：
+```sql
+SELECT *
+FROM t
+WHERE id < 10;
+```
+看到：1、5
+如果没有间隙锁：
+事务B：
+```sql
+INSERT INTO t VALUES(8);
+```
+提交。
+事务A再查询，看到1、5、8
+出现了新的记录，这就是幻读
+
 ### 如果2个范围不是主键或索引？会阻塞吗
 如果2个范围查询的字段不是索引的话，那就代表 update 没有用到索引，这时候触发了全表扫描，全部索引都会加行级锁，这时候第二条 update 执行的时候，就会阻塞了。
 因为如果 update 没有用到索引，在扫描过程中会对索引加锁，所以全表扫描的场景下，所有记录都会被加锁，也就是这条 update 语句产生了 4 个记录锁和 5 个间隙锁，相当于锁住了全表。
 ![[images/Pasted image 20251129205848.png]]
+
+因为InnoDB的锁不是直接加在条件上的
+比如：`WHERE age=10`，数据库并不知道锁`age=10`，它实际上锁：扫描过程中访问到的索引记录
 
 ### MySQL表中新加一个列字段，会锁住整张表吗
 **在现代的 MySQL（5.6 之后，特别是 8.0 之后）中，加字段通常不会锁住整张表（不阻塞读写）；但在老版本中，或者遇到长事务时，可能会引发“锁表”危机。**
@@ -929,6 +964,69 @@ SELECT * FROM table WHERE A = xx AND C = xx;
 | 最左前缀原则 | 决定能不能“用索引定位” |
 | ICP    | 决定能不能“减少回表”  |
 
+例：
+表：
+```sql
+CREATE TABLE user (
+    id INT PRIMARY KEY,
+    age INT,
+    name VARCHAR(20),
+    INDEX idx_age_name(age, name)
+);
+```
+数据：
+```
+id  age  name
+--------------
+1   20   Tom
+2   20   Jack
+3   20   Bob
+4   30   Tom
+```
+执行：
+```sql
+SELECT *
+FROM user
+WHERE age = 20
+AND name LIKE 'J%';
+```
+没有ICP时：
+```
+二级索引 idx_age_name
+找到：
+age=20
+
+得到：
+(id=1)
+(id=2)
+(id=3)
+ |
+ ↓
+全部回表
+id=1 -> 查整行 -> name=Tom -> 丢弃
+id=2 -> 查整行 -> name=Jack -> 返回
+id=3 -> 查整行 -> name=Bob -> 丢弃
+```
+回表3次
+
+有ICP时：
+在索引层就会判断：`name LIKE 'J%'`
+```
+idx_age_name
+age=20
+ ↓
+检查name
+
+Tom  ×
+Jack √
+Bob  ×
+ ↓
+
+只回表：
+id=2
+```
+回表1次
+
 #### 覆盖索引用不上ICP
 不是不能用ICP，而是没必要用ICP
 
@@ -983,7 +1081,6 @@ B+Tree 是一种多叉树，叶子节点才存放数据，非叶子节点只存�
 ```SQL
 select * from product where id= 5;
 ```
-
 这条语句使用了主键索引查询 id 号为 5 的商品。查询过程是这样的，B+Tree 会自顶向下逐层进行查找：
 - 将 5 与根节点的索引数据 (1，10，20) 比较，5 在 1 和 10 之间，所以根据 B+Tree的搜索逻辑，找到第二层的索引数据 (1，4，7)；
 - 在第二层的索引数据 (1，4，7)中进行查找，因为 5 在 4 和 7 之间，所以找到第三层的索引数据（4，5，6）；
@@ -1119,10 +1216,10 @@ CREATE INDEX index_product_no_name ON product(product_no, name);
 	- 由于没有存完整数据，所以当你执行 SELECT * FROM table WHERE name = '张三' 时：
 	    1. 先在 name 的二级索引树上查找到 '张三'。
 	    2. 在叶子节点拿到 '张三' 对应的**主键 ID**。
-	    3. 带着主键 ID 去**聚簇索引（主键索引）树**上再查一遍，拿到完整的行数据。这个过程叫做**“回表”**。
+	    3. 带着主键 ID 去**聚簇索引（主键索引）树**上再查一遍，拿到完整的行数据。这个过程叫做 **“回表”**。
 
 ### 联合索引(A, B, C)，现在有个执行语句是A = xxx and C < xxx，索引怎么走
-根据最左匹配原则，A可以走联合索引，C不会走联合索引，但是C可以走索引下推
+根据最左匹配原则，A可以走联合索引，C不会走联合索引，但是C可以走索引下推（非覆盖索引）
 
 ### 联合索引(a,b,c) ，查询条件 where b > xxx and a = x 会生效吗
 索引会生效，a 和 b 字段都能利用联合索引，符合联合索引最左匹配原则。
@@ -1140,7 +1237,7 @@ CREATE INDEX index_product_no_name ON product(product_no, name);
 
 ### ==索引失效有哪些？==
 6 种会发生索引失效的情况：
-- 当我们使用左或者左右模糊匹配的时候，也就是 like %xx 或者 like %xx%这两种方式都会造成索引失效；
+- 当我们使用左或者左右模糊匹配的时候，也就是 `like %xx` 或者 `like %xx%`这两种方式都会造成索引失效；
 - 当我们在查询条件中对索引列使用函数，就会导致索引失效。
 - 当我们在查询条件中对索引列进行表达式计算，也是无法走索引的。
 - MySQL 在遇到字符串和数字比较的时候，会自动把字符串转为数字，然后再进行比较。如果字符串是索引列，而条件语句中的输入参数是数字的话，那么索引列会发生隐式类型转换，由于隐式类型转换是通过 CAST 函数实现的，等同于对索引列使用了函数，所以就会导致索引失效。
@@ -1360,6 +1457,146 @@ SELECT id, user_id, create_time, state
 ```SQL
 CREATE INDEX idx_user_time_cover 
 ON order(user_id, create_time, state, id);
+```
+
+### 普通索引的索引列允许为NULL吗
+普通索引的索引列允许为NULL，这是和主键索引最大的区别之一。
+唯一索引的索引列也允许为NULL，因为在SQL中`NULL != NULL`，两个NULL不认为相等
+
+#### NULL会不会进入普通索引？
+InnoDB的二级索引中会存储`NULL`
+表：
+```
+id    age
+-----------
+1     NULL
+2     20
+3     30
+4     NULL
+```
+普通索引：
+```
+idx_age
+
+age       主键id
+----------------
+NULL       1
+NULL       4
+20         2
+30         3
+```
+NULL也作为一个索引值参与排序。查询NULL也可以走索引，使用`where xxx is null`
+
+#### NULL在索引里面怎么排序
+InnoDB对NULL有自己的排序规则，通常认为：`NULL < 任意非NULL值`，**但需要注意，这个<不是数学意义上的小于**
+
+例如：
+```sql
+select NULL < 5;
+```
+结果：`NULL`
+不是：`TRUE`
+原因：SQL中NULL表示不知道
+
+SQL 三值逻辑：
+
+| 表达式         | 结果      |
+| ----------- | ------- |
+| 5 < 10      | TRUE    |
+| 5 > 10      | FALSE   |
+| NULL < 10   | UNKNOWN |
+| NULL = NULL | UNKNOWN |
+所以：
+**索引排序规则 ≠ SQL比较规则**
+这是两个不同层面的东西。
+
+举一个完整例子
+表：
+```sql
+CREATE TABLE student(
+    id INT PRIMARY KEY,
+    score INT,
+    INDEX idx_score(score)
+);
+```
+数据：
+```
+id    score
+-------------
+1     NULL
+2     80
+3     60
+4     NULL
+5     90
+```
+建立索引后：
+```
+idx_score
+
+score       id
+----------------
+NULL        1
+NULL        4
+60          3
+80          2
+90          5
+```
+现在执行：
+```sql
+SELECT *
+FROM student
+WHERE score IS NULL;
+```
+数据库从索引最左侧找到NULL区间，然后回表，所以`is null`可以走索引
+
+但是
+```sql
+SELECT *
+FROM student
+WHERE score < 70;
+```
+逻辑判断：`NULL < 70`结果为`UNKNOWN`，where要求`TRUE才保留`，所以结果不会包含`score=NULL`
+
+#### NULL在联合索引中怎么办？
+假设：
+```
+INDEX idx_a_b(a,b)
+```
+数据：
+```
+a       b
+------------
+NULL    10
+NULL    20
+1       5
+1       8
+2       3
+```
+索引排序：
+首先比较 a：
+```
+NULL < 1 < 2
+```
+所以：
+```
+a       b
+-------------
+NULL    10
+NULL    20
+1       5
+1       8
+2       3
+```
+如果 a 相同，再比较 b。
+所以查询：
+```
+WHERE a IS NULL AND b=20
+```
+很好：
+```
+找到NULL区域
+    |
+    找b=20
 ```
 
 ## 事务
