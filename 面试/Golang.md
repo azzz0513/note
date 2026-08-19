@@ -5773,5 +5773,717 @@ read map是dirty map的一个不完全的、且可能是过期的只读快照。
 ### Sync.Map适用的场景
 适合读多写少的场景
 
+## 设计模式
+### 单例模式
+传统实现：在面向对象语言中，单例模式通常需要通过私有构造函数、静态变量和双重检查锁定来实现线程安全的单例。
 
+Go实现：在Go中，可以通过`sync.Once`来实现线程安全的单例模式，代码更加简洁。
+```Go
+package main  
+  
+import (  
+    "fmt"  
+    "sync"  
+)  
+  
+// 单例结构体  
+type Singleton struct{}  
+  
+var (  
+    instance *Singleton  
+    once     sync.Once  
+)  
+  
+// 获取单例实例  
+func GetInstance() *Singleton {  
+    once.Do(func() {  
+        instance = &Singleton{}  
+    })  
+    return instance  
+}  
+  
+func main() {  
+    s1 := GetInstance()  
+    s2 := GetInstance()  
+  
+    fmt.Println(s1 == s2) // true  
+}
+```
+- 使用`sync.Once`确保单例只初始化一次，避免手动实现锁和双重检查。
 
+### 工厂模式
+传统实现：在传统语言中，工厂模式通常通过一个基类（或接口）和具体子类实现。
+
+Go实现：由于Go语言没有类，工厂模式可以通过接口来抽象行为，通过函数直接创建实例。
+```Go
+package main  
+  
+import"fmt"  
+  
+// 动物接口  
+type Animal interface {  
+    Speak() string  
+}  
+  
+// 狗的实现  
+type Dog struct{}  
+  
+func (d Dog) Speak() string {  
+    return"Woof!"  
+}  
+  
+// 猫的实现  
+type Cat struct{}  
+  
+func (c Cat) Speak() string {  
+    return"Meow!"  
+}  
+  
+// 工厂函数  
+func NewAnimal(animalType string) Animal {  
+    switch animalType {  
+    case"dog":  
+        return Dog{}  
+    case"cat":  
+        return Cat{}  
+    default:  
+        returnnil  
+    }  
+}  
+  
+func main() {  
+    dog := NewAnimal("dog")  
+    fmt.Println(dog.Speak()) // Woof!  
+  
+    cat := NewAnimal("cat")  
+    fmt.Println(cat.Speak()) // Meow!  
+}
+```
+- 使用简单的工厂函数代替复杂的类和构造函数
+- 动物的行为通过接口抽象，而具体类型由工厂函数决定
+
+### 策略模式
+传统实现：策略模式通常通过抽象基类和多个具体子类来实现不同策略
+
+Go实现：在Go中，可以直接使用接口和函数作为策略实现
+```Go
+package main  
+  
+import"fmt"  
+  
+// 策略接口  
+type PaymentStrategy interface {  
+    Pay(amount float64)  
+}  
+  
+// 信用卡支付  
+type CreditCard struct{}  
+  
+func (cc CreditCard) Pay(amount float64) {  
+    fmt.Printf("Paid %.2f using Credit Card.\n", amount)  
+}  
+  
+// PayPal 支付  
+type PayPal struct{}  
+  
+func (pp PayPal) Pay(amount float64) {  
+    fmt.Printf("Paid %.2f using PayPal.\n", amount)  
+}  
+  
+// 使用策略模式  
+func ProcessPayment(strategy PaymentStrategy, amount float64) {  
+    strategy.Pay(amount)  
+}  
+  
+func main() {  
+    cc := CreditCard{}  
+    pp := PayPal{}  
+  
+    ProcessPayment(cc, 100.0) // Paid 100.00 using Credit Card.  
+    ProcessPayment(pp, 200.0) // Paid 200.00 using PayPal.  
+}
+```
+- 使用接口定义策略行为，通过具体实现来提供不同的策略
+- 策略选择可以在运行时动态更改
+
+### 观察者模式
+传统实现：观察者模式通过一个主题（Subject）和多个观察者（Observer）实现，主题通知观察者更新。
+
+Go实现：在Go中，可以通过Channel实现观察者模式，利用Goroutine提供异步通知。
+```Go
+package main  
+  
+import"fmt"  
+  
+// 观察者  
+type Observer interface {  
+    Update(data string)  
+}  
+  
+// 具体观察者  
+type ConcreteObserver struct {  
+    id string  
+}  
+  
+func (co *ConcreteObserver) Update(data string) {  
+    fmt.Printf("Observer %s received: %s\n", co.id, data)  
+}  
+  
+// 主题  
+type Subject struct {  
+    observers []Observer  
+}  
+  
+func (s *Subject) Register(observer Observer) {  
+    s.observers = append(s.observers, observer)  
+}  
+  
+func (s *Subject) Notify(data string) {  
+    for _, observer := range s.observers {  
+        observer.Update(data)  
+    }  
+}  
+  
+func main() {  
+    subject := &Subject{}  
+  
+    observer1 := &ConcreteObserver{id: "1"}  
+    observer2 := &ConcreteObserver{id: "2"}  
+  
+    subject.Register(observer1)  
+    subject.Register(observer2)  
+  
+    subject.Notify("Hello Observers!")  
+}
+```
+- 使用接口定义观察者行为
+- `Notify`方法遍历所有观察者并调用其`Update`方法
+
+### 并发原语
+
+|原语|用途|适用场景|
+|---|---|---|
+|`goroutine`|并发执行|I/O 并行、后台任务|
+|`channel`|通信同步|数据流、信号传递|
+|`sync.Mutex`|互斥锁|临界区保护|
+|`sync.RWMutex`|读写锁|读多写少场景|
+|`sync.WaitGroup`|等待一组完成|并行任务收集|
+|`sync.Once`|单次执行|初始化、懒加载|
+|`sync.Map`|并发安全 Map|高并发键值存储|
+|`sync.Pool`|对象池|减少 GC 压力|
+|`context`|取消信号传播|超时、取消、截止时间|
+#### 模式一：errgroup并行错误处理
+`golang.org/x/sync/errgroup` 是处理**一组并发任务**的最佳工具，它会自动收集所有 Goroutine 的错误。
+
+基础用法：
+```Go
+package main  
+  
+import (  
+    "context"  
+    "fmt"  
+    "net/http"  
+  
+    "golang.org/x/sync/errgroup"  
+)  
+  
+func fetchURLs(urls []string) error {  
+    g, ctx := errgroup.WithContext(context.Background())  
+  
+    for _, url := range urls {  
+        url := url // 避免闭包捕获  
+        g.Go(func() error {  
+            req, err := http.NewRequestWithContext(ctx, "GET", url, nil)  
+            if err != nil {  
+                return fmt.Errorf("creating request for %s: %w", url, err)  
+            }  
+  
+            resp, err := http.DefaultClient.Do(req)  
+            if err != nil {  
+                return fmt.Errorf("fetching %s: %w", url, err)  
+            }  
+            defer resp.Body.Close()  
+  
+            fmt.Printf("Fetched %s: status %d\n", url, resp.StatusCode)  
+            return nil  
+        })  
+    }  
+  
+    // 等待所有任务完成，或者第一个错误发生  
+    return g.Wait()  
+}
+```
+
+##### 限制并发数
+`errgroup` 本身不限制并发数，需要配合 semaphore 使用：
+```Go
+func fetchURLsWithLimit(urls []string, limit int) error {  
+    g, ctx := errgroup.WithContext(context.Background())  
+  
+    // 创建一个带限制的 semaphore  
+    sem := make(chan struct{}, limit)  
+  
+    for _, url := range urls {  
+        url := url  
+        g.Go(func() error {  
+            // 获取信号量  
+            sem <- struct{}{}  
+            defer func() { <-sem }()  
+  
+            // 检查上下文是否已取消  
+            select {  
+            case <-ctx.Done():  
+                return ctx.Err()  
+            default:  
+            }  
+  
+            resp, err := http.Get(url)  
+            if err != nil {  
+                return err  
+            }  
+            defer resp.Body.Close()  
+            return nil  
+        })  
+    }  
+  
+    return g.Wait()  
+}
+```
+##### 错误传播机制
+当任何一个Goroutine返回错误时：
+- 上下文被取消
+- 其他正在运行的Goroutine会收到`ctx.Err()`
+- `g.Wait()`返回第一个错误
+```Go
+g, ctx := errgroup.WithContext(context.Background())  
+  
+g.Go(func() error {  
+    time.Sleep(2 * time.Second)  
+    return errors.New("task 1 failed")  
+})  
+  
+g.Go(func() error {  
+    <-ctx.Done()  
+    return ctx.Err() // 收到取消信号  
+})  
+  
+err := g.Wait()  
+// err = "task 1 failed"
+```
+
+#### 模式二：Pipeline流水线模式
+Pipeline是Go并发中最强大的模式之一，它将处理过程分解为多个阶段，每个阶段通过Channel连接。
+
+##### 经典Pipeline
+```Go
+func Pipeline(nums []int) (<-chan int, <-chan error) {  
+    // Stage 1: 生成数字  
+    out1 := make(chan int)  
+    stage1Err := make(chan error, 1)  
+  
+    gofunc() {  
+        defer close(out1)  
+        for _, n := range nums {  
+            select {  
+            case out1 <- n:  
+            case <-time.After(100 * time.Millisecond):  
+                // 超时处理  
+            }  
+        }  
+        stage1Err <- nil  
+    }()  
+  
+    // Stage 2: 平方  
+    out2 := make(chan int)  
+    stage2Err := make(chan error, 1)  
+  
+    gofunc() {  
+        defer close(out2)  
+        for n := range out1 {  
+            out2 <- n * n  
+        }  
+        stage2Err <- nil  
+    }()  
+  
+    // Stage 3: 过滤偶数  
+    out3 := make(chan int)  
+    stage3Err := make(chan error, 1)  
+  
+    gofunc() {  
+        defer close(out3)  
+        for n := range out2 {  
+            if n%2 == 0 {  
+                out3 <- n  
+            }  
+        }  
+        stage3Err <- nil  
+    }()  
+  
+    // 汇总错误  
+    errCh := make(chan error, 3)  
+    go func() {  
+        errCh <- <-stage1Err  
+        errCh <- <-stage2Err  
+        errCh <- <-stage3Err  
+        close(errCh)  
+    }()  
+  
+    return out3, errCh  
+}
+```
+
+##### 使用iterator简化Pipeline
+Go 1.23引入了`iter`包，可以更优雅地处理Pipeline：
+```Go
+import "iter"  
+  
+func SquarePipeline(nums []int) iter.Seq[int] {  
+    return func(yield func(int) bool) {  
+        for _, n := range nums {  
+            if !yield(n * n) {  
+                return  
+            }  
+        }  
+    }  
+}  
+  
+func FilterEven(seq iter.Seq[int]) iter.Seq[int] {  
+    return func(yield func(int) bool) {  
+        for n := range seq {  
+            if n%2 == 0 {  
+                if !yield(n) {  
+                    return  
+                }  
+            }  
+        }  
+    }  
+}  
+  
+// 使用  
+for n := range FilterEven(SquarePipeline([]int{1, 2, 3, 4})) {  
+    fmt.Println(n) // 4, 16  
+}
+```
+
+#### 模式三：Worker Pool模式
+Woker Pool控制并发数量，避免创建过多Goroutine。
+
+##### 基础实现
+```Go
+type Job struct {  
+    ID   int  
+    Data string  
+}  
+  
+type Result struct {  
+    JobID    int  
+    Output   string  
+    WorkerID int  
+}  
+  
+func WorkerPool(jobs <-chan Job, results chan<- Result, numWorkers int) {  
+    var wg sync.WaitGroup  
+  
+    for i := 0; i < numWorkers; i++ {  
+        wg.Add(1)  
+        go func(workerID int) {  
+            defer wg.Done()  
+            for job := range jobs {  
+                // 模拟处理  
+                output := process(job.Data)  
+                results <- Result{  
+                    JobID:    job.ID,  
+                    Output:   output,  
+                    WorkerID: workerID,  
+                }  
+            }  
+        }(i)  
+    }  
+  
+    wg.Wait()  
+    close(results)  
+}  
+  
+func process(data string) string {  
+    time.Sleep(100 * time.Millisecond)  
+    return strings.ToUpper(data)  
+}
+```
+
+##### 带错误处理的Worker Pool
+```Go
+type WorkerPoolWithError struct {  
+    jobs    chan Job  
+    results chan Result  
+    errors  chan error  
+    done    chanstruct{}  
+}  
+  
+func NewWorkerPool(workers int) *WorkerPoolWithError {  
+    wp := &WorkerPoolWithError{  
+        jobs:    make(chan Job, workers*2),  
+        results: make(chan Result, workers*2),  
+        errors:  make(chan error, workers),  
+        done:    make(chan struct{}),  
+    }  
+  
+    for i := 0; i < workers; i++ {  
+        go wp.worker(i)  
+    }  
+  
+    return wp  
+}  
+  
+func (wp *WorkerPoolWithError) worker(id int) {  
+    for job := range wp.jobs {  
+        result, err := wp.process(job)  
+        if err != nil {  
+            select {  
+            case wp.errors <- fmt.Errorf("worker %d: %w", id, err):  
+            default:  
+                // 错误队列满，跳过  
+            }  
+            continue  
+        }  
+        wp.results <- result  
+    }  
+}  
+  
+func (wp *WorkerPoolWithError) Submit(job Job) {  
+    wp.jobs <- job  
+}  
+  
+func (wp *WorkerPoolWithError) Close() {  
+    close(wp.jobs)  
+    <-wp.done  
+}
+```
+
+#### 模式四：Fan-Out/Fan-In模式
+Fan-Out 将任务分发到多个 Goroutine，Fan-In 将结果合并。
+
+##### Fan-Out
+```Go
+func fanOut(ctx context.Context, items []Item) <-chan Result {  
+    results := make(chan Result, len(items))  
+  
+    for _, item := range items {  
+        item := item  
+        go func() {  
+            select {  
+            case results <- processItem(ctx, item):  
+            case <-ctx.Done():  
+                results <- Result{Err: ctx.Err()}  
+            }  
+        }()  
+    }  
+  
+    return results  
+}
+```
+
+##### Fan-In
+```Go
+func fanIn(chans ...<-chan Result) <-chan Result {  
+    results := make(chan Result)  
+  
+    var wg sync.WaitGroup  
+    for _, ch := range chans {  
+        wg.Add(1)  
+        go func(ch <-chan Result) {  
+            defer wg.Done()  
+            for r := range ch {  
+                results <- r  
+            }  
+        }(ch)  
+    }  
+  
+    go func() {  
+        wg.Wait()  
+        close(results)  
+    }()  
+  
+    return results  
+}
+```
+
+##### 实际应用
+```Go
+func fetchAll(ctx context.Context, urls []string) ([]string, error) {  
+    // 创建多个 channel  
+    chans := make([]<-chan string, len(urls))  
+    for i, url := range urls {  
+        chans[i] = fetchURL(ctx, url)  
+    }  
+  
+    // 合并结果  
+    return fanInStrings(chans...), nil  
+}
+```
+
+#### 模式五：Semaphore 信号量模式
+信号量控制同时访问资源的 Goroutine 数量。
+
+##### 简单实现
+```Go
+type Semaphore struct {  
+    ch chan struct{}  
+}  
+  
+func NewSemaphore(max int) *Semaphore {  
+    return &Semaphore{  
+        ch: make(chanstruct{}, max),  
+    }  
+}  
+  
+func (s *Semaphore) Acquire(ctx context.Context) error {  
+    select {  
+    case s.ch <- struct{}{}:  
+        return nil  
+    case <-ctx.Done():  
+        return ctx.Err()  
+    }  
+}  
+  
+func (s *Semaphore) Release() {  
+    <-s.ch  
+}  
+  
+// 使用  
+sem := NewSemaphore(10) // 最多 10 个并发  
+  
+for _, task := range tasks {  
+    if err := sem.Acquire(ctx); err != nil {  
+        return err  
+    }  
+  
+    go func() {  
+        defer sem.Release()  
+        // 执行任务  
+    }()  
+}
+```
+
+##### golang.org/x/sync/semaphore
+Go 标准库提供了官方的信号量实现：
+```Go
+import "golang.org/x/sync/semaphore"  
+  
+func processWithLimit(ctx context.Context, items []Item, limit int64) error {  
+    sem := semaphore.NewWeighted(limit)  
+  
+    for _, item := range items {  
+        if err := sem.Acquire(ctx, 1); err != nil {  
+            return err  
+        }  
+  
+        go func(item Item) {  
+            defer sem.Release(1)  
+            process(item)  
+        }(item)  
+    }  
+  
+    return sem.Acquire(ctx, limit) // 等待所有完成  
+}
+```
+
+#### 模式六：sync.Once 单次执行
+`sync.Once` 保证代码只执行一次，常用于懒初始化。
+
+##### 基础用法
+```Go
+type Database struct {  
+    conn   *Connection  
+    initOnce sync.Once  
+    err     error  
+}  
+  
+func (db *Database) GetConnection() (*Connection, error) {  
+    db.initOnce.Do(func() {  
+        conn, err := connect("localhost:5432")  
+        if err != nil {  
+            db.err = err  
+            return  
+        }  
+        db.conn = conn  
+    })  
+  
+    return db.conn, db.err  
+}
+```
+
+##### 改进：支持错误传播
+`sync.Once` 不返回错误，需要包装：
+```Go
+type Lazy[T any] struct {  
+    once  sync.Once  
+    value T  
+    err   error  
+    fn    func() (T, error)  
+}  
+  
+func NewLazy[T any](fn func() (T, error)) *Lazy[T] {  
+    return &Lazy[T]{fn: fn}  
+}  
+  
+func (l *Lazy[T]) Get() (T, error) {  
+    l.once.Do(func() {  
+        l.value, l.err = l.fn()  
+    })  
+    return l.value, l.err  
+}
+```
+
+#### 模式七：sync.Pool 对象池
+`sync.Pool` 减少 GC 压力，复用临时对象。
+
+##### 基础用法
+
+```Go
+var bufPool = sync.Pool{  
+    New: func() interface{} {  
+        b := make([]byte, 4096)  
+        return &b  
+    },  
+}  
+  
+func process(data []byte) []byte {  
+    // 获取 buffer  
+    buf := bufPool.Get().(*[]byte)  
+    defer bufPool.Put(buf)  
+  
+    // 处理数据  
+    // ...  
+  
+    return result  
+}
+```
+
+##### 真实场景：减少 GC 压力
+```Go
+type Serializer struct {  
+    bufPool sync.Pool  
+}  
+  
+func NewSerializer() *Serializer {  
+    return &Serializer{  
+        bufPool: sync.Pool{  
+            New: func() interface{} {  
+                return &bytes.Buffer{}  
+            },  
+        },  
+    }  
+}  
+  
+func (s *Serializer) Serialize(v interface{}) ([]byte, error) {  
+    buf := s.bufPool.Get().(*bytes.Buffer)  
+    deferfunc() {  
+        buf.Reset()  
+        s.bufPool.Put(buf)  
+    }()  
+  
+    enc := json.NewEncoder(buf)  
+    err := enc.Encode(v)  
+    return buf.Bytes(), err  
+}
+```
