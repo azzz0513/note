@@ -3975,6 +3975,160 @@ Go编译器在编译阶段进行的一项分析工作，核心目的是决定一
 逃逸分析的工作原理：
 基于指针流的静态分析：编译器构建一张有向图，追踪每个变量的指针流向。如果某个变量的地址被传递到了"会活得比当前函数更久"的地方，它就必须逃逸。
 
+### 为什么any容易导致内存逃逸
+不能理解成 **“只要用了 `interface{}` 就一定内存逃逸”**。更准确地说：
+> **把具体值装箱（boxing）进 interface 时，某些情况下需要为这个值提供一块独立、稳定的存储；如果这块存储不能安全留在当前栈帧，就会逃逸到堆。**
+
+先从 interface 底层结构看：
+```go
+// 空接口 interface{} / any
+type eface struct {
+    _type *Type
+    data  unsafe.Pointer
+}
+```
+
+例如：
+```go
+var x any = User{
+    Age: 18,
+}
+```
+
+逻辑上是：
+```
+x (interface)
+
+┌──────────────┐
+│ type → User  │
+│ data ────────┼────→ User{Age:18}
+└──────────────┘
+```
+
+关键就是这个 `data`。
+
+假设：
+```go
+func f() any {
+    x := User{Age: 18}
+    return x
+}
+```
+
+如果 `x` 对应的数据仍然放在 `f` 的栈帧：
+```
+f Stack
+
+┌───────────────┐
+│ x: User       │ ← interface.data
+└───────────────┘
+```
+
+`f()` 返回之后：
+```
+f 的栈帧失效
+```
+
+但是返回的 interface 仍然需要通过 `data` 找到这个 `User`。
+所以不能让：
+```
+interface.data → 已经失效的 f 栈帧
+```
+
+因此编译器可能把用于 interface 的值放到堆上：
+```
+Heap
+
+┌───────────────┐
+│ User{Age:18}  │
+└───────────────┘
+        ↑
+        │
+interface.data
+```
+
+这就是典型的：
+```
+具体值
+  ↓
+装箱到 interface
+  ↓
+interface 逃出当前作用域
+  ↓
+具体值需要稳定存储
+  ↓
+heap allocation
+```
+但要注意，**不是 interface 本身导致逃逸，而是它的使用方式导致逃逸分析认为值必须活得比当前栈帧久。**
+
+比如：
+```go
+func f() {
+    x := 123
+    var a any = x
+    use(a)
+}
+```
+
+如果编译器能够证明：
+```
+a 不会逃出 f
+```
+那么完全可能不发生堆逃逸。
+
+你可以自己验证：
+```
+go build -gcflags="-m=2" .
+```
+
+编译器会告诉你类似：
+```
+x escapes to heap
+```
+
+或者：
+```
+x does not escape
+```
+
+还有一个很容易混淆的点：interface 的 `data` **并不意味着所有值都一定 `malloc` 一块堆内存**。编译器/runtime 对一些值存在优化，比如某些小值、静态数据、非逃逸场景可以避免实际 heap allocation。
+
+所以面试里如果问：
+> 为什么 interface{} 容易导致内存逃逸？
+
+比较准确的回答是：
+> interface 底层需要通过 `data` 保存具体动态值。将具体值转换为 interface 时会发生装箱；如果这个 interface 逃出了当前栈帧，或者编译器无法证明其生命周期局限于当前栈帧，那么用于保存动态值的数据就不能继续依赖当前栈帧，因此可能被分配到堆上。
+
+尤其常见于：
+```go
+func f() any {
+    x := User{}
+    return x // 很典型
+}
+```
+
+以及：
+```go
+var global any
+
+func f() {
+    x := User{}
+    global = x // 很典型
+}
+```
+
+而：
+```go
+func f() {
+    x := User{}
+    var a any = x
+    // a 只在本函数内部使用
+}
+```
+**不能直接断言 `x` 一定逃逸。**
+
+另外，这也是为什么像 `fmt.Printf("%v", x)` 这种大量使用 `...any` 的 API 经常会和逃逸分析一起被讨论——但也不能简单地说“传给 `fmt` 就必然逃逸”，最终仍以编译器的逃逸分析结果为准。
+
 ### 如何避免内存逃逸
 #### 尽量传值，少传指针
 **原则**：如果对象不大（例如普通的 struct、int、bool），**直接传值（Value Copy）** 比传指针更好。
@@ -4533,8 +4687,7 @@ Go的解决方案：
 - span+mcache+mcentral
 - 类似slab allocator
 
-
-### Green Tea垃圾回收器（未实际使用）
+### Green Tea垃圾回收器
 在 Go 1.25 中，Go 团队引入了一个实验性的新 GC——**Green Tea**。它的核心思想很简单：把传统的“按对象遍历”改为“按内存页（page）为单位扫描”，以改善缓存局部性并减少在标记阶段的内存等待，从而降低 GC 的 CPU 成本。
 
 Go使用的标记-清除（mark-sweep）算法在概念上很直观：
@@ -4704,7 +4857,6 @@ func greenTeaMark(startPage *Page) {
     }  
 }
 ```
-
 
 ### Go语言的GC使用的是什么
 Go的GC使用的是无分代（对象没有代际之分）、不整理（回收过程中不对对象进行移动与整理）、并发（与用户代码并发执行）的三色标记清扫算法
@@ -5399,7 +5551,7 @@ type WaitGroup struct {
 它是一个计数信号量。主协程，使用它来阻塞等待一组子协程执行完毕
 - `Add(delta int)`：增加计数（派发任务）
 - `Done()`：减少计数（任务完成，等同于`Add(-1)`）
-- `Wait()`：阻塞当前协程，知道计数器归零
+- `Wait()`：阻塞当前协程，直到计数器归零
 - Add必须在协程启动之前就执行，因为主协程的执行速度非常快，可能在子协程还没来得及执行wg.Add(1)之前，就已经执行到了wg.Wait()
 
 使用WaitGroup的原则是谁启动协程，谁负责Add：
@@ -5770,6 +5922,1757 @@ read map是dirty map的一个不完全的、且可能是过期的只读快照。
 
 ### Sync.Map适用的场景
 适合读多写少的场景
+
+### Sync.Map流程解析
+假设：
+```
+var m sync.Map
+```
+
+执行：
+```
+m.Store("A", 1)
+```
+
+此时可能：
+```
+read:
+{}
+
+dirty:
+A -> 1
+
+amended = true
+```
+
+然后：
+```
+m.Load("A")
+```
+
+read miss：
+```
+read:
+没有 A
+```
+
+查 dirty：
+```
+找到 A
+```
+
+misses 增长。
+满足 promotion 条件后：
+```
+read:
+A -> 1
+
+dirty:
+nil
+```
+
+之后：
+```
+Load("A")
+```
+
+就是：
+```
+read hit
+→ atomic load entry
+```
+
+无锁。
+再执行：
+```
+m.Store("B", 2)
+```
+
+会：
+```
+read:
+A
+
+dirty:
+A
+B
+
+amended=true
+```
+
+这里：
+```
+read["A"]
+dirty["A"]
+```
+
+指向同一个 entry。
+然后不断：
+```
+Load("B")
+```
+
+导致 miss：
+```
+misses++
+```
+
+达到阈值：
+```
+dirty → read
+```
+
+最终：
+```
+read:
+A
+B
+
+dirty:nil
+```
+
+#### 为什么设计两种删除状态
+`nil` 表示“这个 key 当前没有值，但是这个 entry 仍然可能属于 dirty”；  
+`expunged` 表示“这个 key 当前没有值，而且可以确定这个 entry 已经不属于 dirty”。
+
+假设现在：
+```
+read:
+A -> entryA
+B -> entryB
+
+dirty:
+A -> entryA
+B -> entryB
+C -> entryC
+```
+
+注意 `read["A"]` 和 `dirty["A"]` 指向的是**同一个 entryA**：
+```
+read["A"] ───┐
+             │
+             ▼
+          entryA
+             ▲
+             │
+dirty["A"] ──┘
+```
+
+现在调用：
+```
+m.Delete("A")
+```
+
+如果 `A` 在 `read` 里，我们希望删除非常便宜，最好不要：
+```
+mu.Lock()
+delete(dirty, "A")
+mu.Unlock()
+```
+
+因为这会把原本可以依靠原子操作完成的删除变成加锁操作。
+所以经典实现采用：
+```
+entryA.p = nil
+```
+
+通过 CAS 把：
+```
+value -> nil
+```
+即可。
+
+于是：
+```
+read:
+A -> entryA(p=nil)
+
+dirty:
+A -> entryA(p=nil)
+```
+
+虽然两个 map 里还都有 `A`，但是查到 entry 后发现：
+```
+entry.p == nil
+```
+
+就知道逻辑上已经删除了。
+所以此时：
+```
+nil = “逻辑删除”
+```
+
+但注意一个非常关键的问题：
+```
+dirty 中仍然有 A。
+```
+
+这就是为什么不能把 `nil` 理解成：
+> “这个 entry 已经彻底从所有结构里移除了。”
+
+它只是说：
+> “当前没有有效 value。”
+
+然后考虑另一种状态。
+假设当前：
+```
+read:
+A -> entryA(p=nil)
+B -> entryB
+
+dirty = nil
+```
+
+现在要执行：
+```
+m.Store("C", 3)
+```
+
+由于出现了一个新的 key `C`，经典 `sync.Map` 需要创建新的 `dirty`。
+它会大致把 `read` 中还有效的 entry 搬到 dirty：
+```
+read:
+A -> entryA(nil)
+B -> entryB
+
+            ↓ 创建 dirty
+
+dirty:
+B -> entryB
+C -> entryC
+```
+
+这里有个问题：
+**A 已经删了，所以没必要把 A 放进 dirty。**
+因此：
+```
+dirty:
+B
+C
+```
+
+没有 A。
+但 read 是只读快照，又不能：
+```
+delete(read.m, "A")
+```
+
+所以 read 里面依然是：
+```
+read:
+A -> entryA
+B -> entryB
+```
+
+此时系统必须记住一件事情：
+```
+entryA 不仅“没有 value”
+而且
+entryA 已经“不在 dirty 中”
+```
+
+于是：
+```
+entryA.p = expunged
+```
+
+变成：
+```
+read:
+A -> entryA(expunged)
+B -> entryB
+
+dirty:
+B -> entryB
+C -> entryC
+```
+
+这时候：
+```
+expunged
+```
+表达的就比 `nil` 多了一层信息。
+
+所以把两个状态放在一起看：
+```
+p = nil
+```
+
+意味着：
+```
+这个 key 没有 value
+
+但是：
+
+dirty 里面可能仍然存在这个 entry
+```
+
+而：
+```
+p = expunged
+```
+
+意味着：
+```
+这个 key 没有 value
+
+并且：
+
+dirty 里面一定没有这个 entry
+```
+
+这就是二者本质区别。
+可以把它记成：
+```
+nil
+=
+逻辑删除
+但 entry 和 dirty 的关系还没有“清理”
+
+expunged
+=
+逻辑删除
++
+已经从 dirty 中排除
+```
+
+为什么这个信息这么重要？
+因为它直接决定了后面的 `Store` 能不能只靠 CAS 完成。
+假设现在第一种情况：
+```
+read:
+A -> entryA(nil)
+
+dirty:
+A -> entryA(nil)
+```
+
+然后：
+```
+m.Store("A", 100)
+```
+
+因为 dirty 里本来就有 A：
+```
+read["A"] ───┐
+             ▼
+           entryA
+             ▲
+dirty["A"] ──┘
+```
+
+那只需要：
+```
+entryA.p:
+
+nil
+ ↓
+100
+```
+就行了。
+不需要修改 map 的结构。
+
+因此理论上可以利用原子 CAS：
+```
+nil -> &100
+```
+
+整个结构重新“复活”：
+```
+read:
+A -> entryA(100)
+
+dirty:
+A -> entryA(100)
+```
+非常简单。
+
+但是如果是：
+```
+read:
+A -> entryA(expunged)
+
+dirty:
+没有 A
+```
+
+现在：
+```
+m.Store("A", 100)
+```
+
+你能不能直接：
+```
+expunged -> 100
+```
+？
+
+**不能。**
+
+这是理解 `expunged` 最关键的地方。
+因为如果直接这么干，就会得到：
+```
+read:
+A -> entryA(100)
+
+dirty:
+B
+C
+```
+
+注意：
+```
+dirty 里没有 A。
+```
+
+这时候如果以后发生：
+```
+dirty → read
+```
+
+新的 read 会变成：
+```
+read:
+B
+C
+```
+
+于是刚刚 Store 的：
+```
+A = 100
+```
+
+突然丢了。
+
+所以对于 `expunged` 状态：
+```
+Store("A", 100)
+```
+不能单纯 CAS value。
+
+必须：
+```
+1. 加锁
+
+2. 把 entryA 重新加入 dirty
+
+3. expunged -> nil
+
+4. nil -> value
+```
+
+也就是：
+```
+before:
+
+read:
+A ────────> entryA(expunged)
+
+dirty:
+B
+C
+
+
+Store("A", 100)
+
+          ↓
+
+mu.Lock()
+
+dirty["A"] = entryA
+
+entryA:
+expunged -> nil -> 100
+
+
+after:
+
+read["A"] ───┐
+             ▼
+          entryA(100)
+             ▲
+             │
+dirty["A"] ──┘
+```
+这里 `expunged` 的作用就非常明显了：
+> **它是在告诉 Store：不要直接 CAS，这个 entry 已经脱离 dirty 了，你必须先加锁把它重新加入 dirty。**
+
+这才是为什么不能只有一个 `nil`。
+假如只有：
+```
+nil = deleted
+```
+
+那看到：
+```
+entry.p == nil
+```
+
+时，`Store` 根本不知道：
+```
+情况 1：
+
+dirty:
+A -> entryA(nil)
+```
+
+还是：
+```
+情况 2：
+
+dirty:
+没有 A
+
+read:
+A -> entryA(nil)
+```
+
+这两个情况的处理完全不同：
+```
+情况 1：
+
+nil -> value
+
+CAS 就够了
+```
+
+而：
+```
+情况 2：
+
+必须：
+mu.Lock()
+dirty["A"] = entryA
+然后再恢复 value
+```
+
+因此必须再引入一个特殊状态：
+```
+expunged
+```
+把这两个情况区分出来。
+
+### 新底层实现：HashTrieMap
+先建立整体模型。
+
+假设：
+```
+m.Store("A", 100)
+m.Store("B", 200)
+m.Store("C", 300)
+```
+
+新版不是：
+```
+read map
+dirty map
+```
+
+而更像：
+```
+                    root
+                     │
+       ┌─────────────┼─────────────┐
+       │             │             │
+      [2]           [7]           [13]
+       │             │             │
+    entry A        entry B       entry C
+```
+
+不过真实情况不是简单一层，它是一棵 Trie：
+```
+                     root
+                      │
+       ┌──────────────┼───────────────┐
+       │                              │
+     child[2]                       child[10]
+       │                              │
+   indirect                       entry C
+       │
+   ┌───┴────────────┐
+   │                │
+ child[3]         child[12]
+   │                │
+entry A          entry B
+```
+
+这里主要有两类节点：
+```go
+type indirect struct {
+    node
+
+    dead     atomic.Bool
+    mu       Mutex
+    parent   *indirect
+    children [16]atomic.Pointer[node]
+}
+```
+
+和：
+```go
+type entry struct {
+    node
+
+    overflow atomic.Pointer[entry]
+    key      K
+    value    V
+}
+```
+
+也就是：
+```
+indirect
+=
+内部节点
+负责继续往下一层走
+
+entry
+=
+叶子节点
+真正保存 key/value
+```
+
+源码中每个 `indirect` 都有 **16 个 child slot**，因为：
+```
+nChildrenLog2 = 4
+nChildren = 1 << 4 = 16
+```
+
+所以树的每一层都会消费 hash 的 **4 bit**。
+
+这个“每层看 4 bit”就是理解 Hash Trie 最核心的地方。
+假设某个 key 算出来的 hash 是：
+```
+1011 0010 1110 0101 ...
+```
+
+为了方便，我们按 4 bit 分组：
+```
+1011 | 0010 | 1110 | 0101 | ...
+  B      2      E      5
+```
+
+那么这棵树的查找路径可以理解成：
+```
+root
+ ↓
+children[0xB]
+ ↓
+children[0x2]
+ ↓
+children[0xE]
+ ↓
+children[0x5]
+ ...
+```
+
+源码实际是从 hash 的高位开始取：
+```
+hashShift := 8 * goarch.PtrSize
+
+hashShift -= 4
+
+index := (hash >> hashShift) & 0xF
+```
+
+因为：
+```
+0xF = 1111
+```
+
+正好取 4 bit。
+
+所以你可以把 HashTrieMap 理解成：
+> **把 hash 当成一串“导航地址”，每 4 bit 决定走 Trie 的哪个 child。**
+
+比如有：
+```
+hash(A) =
+0011 | 1010 | ...
+
+hash(B) =
+1100 | 0101 | ...
+
+hash(C) =
+0011 | 0111 | ...
+```
+
+那么树可能变成：
+```
+                       root
+                         │
+             ┌───────────┴───────────┐
+             │                       │
+         child[3]                child[12]
+             │                       │
+         indirect                 entry B
+             │
+       ┌─────┴──────┐
+       │            │
+ child[10]       child[7]
+       │            │
+    entry A       entry C
+```
+
+为什么 A 和 C 多了一层？
+
+因为它们第一组 4 bit 都是：
+```
+0011
+```
+
+所以第一层发生了冲突。
+
+继续比较下一组：
+```
+A: 1010
+C: 0111
+```
+
+不同，于是第二层就分开了。
+
+这就是 Trie。
+
+现在来看最重要的 `Load`。
+源码核心逻辑其实非常简单：
+```go
+func (ht *HashTrieMap[K, V]) Load(key K) (value V, ok bool) {
+    hash := hash(key)
+
+    i := ht.root.Load()
+    hashShift := pointerBits
+
+    for hashShift != 0 {
+        hashShift -= 4
+
+        n := i.children[
+            (hash >> hashShift) & 0xf
+        ].Load()
+
+        if n == nil {
+            return zero, false
+        }
+
+        if n.isEntry {
+            return n.entry().lookup(key)
+        }
+
+        i = n.indirect()
+    }
+}
+```
+源码就是这个思路。
+
+假设：
+```
+hash(A):
+0011 | 1010 | ...
+```
+
+那么：
+```
+Load(A)
+
+hash(A)
+   ↓
+0011 | 1010 | ...
+   ↓
+root.children[3]
+   ↓
+indirect
+   ↓
+children[10]
+   ↓
+entry A
+   ↓
+比较 key
+   ↓
+返回 value
+```
+这里你应该马上注意到一个非常重要的特点：
+> **Load 整条路径基本没有加锁。**
+
+因为：
+```
+root.Load()
+children[index].Load()
+```
+
+都是：
+```
+atomic.Pointer
+```
+
+即：
+```
+root
+ ↓ atomic load
+indirect
+ ↓ atomic load
+indirect
+ ↓ atomic load
+entry
+```
+这就是新版仍然能保持高读性能的重要原因。
+
+旧版的无锁读是：
+```
+atomic load read
+↓
+普通 map lookup
+```
+
+新版则是：
+```
+atomic load root
+↓
+atomic load child
+↓
+atomic load child
+↓
+...
+↓
+entry
+```
+
+也就是说新版把：
+```
+read-only map snapshot
+```
+
+换成了：
+```
+read-mostly concurrent trie
+```
+
+这里还有一个很关键的问题：
+> 到底什么时候是 entry，什么时候是 indirect？
+
+比如现在：
+```
+root.children[3] = entry A
+```
+
+也就是：
+```
+root
+ │
+ └── [3] → A
+```
+
+现在来了一个 B，它的 hash 第一段也是 3：
+```
+A:
+0011 | 1010 | ...
+
+B:
+0011 | 0101 | ...
+```
+
+那么：
+```
+root.children[3]
+```
+已经被 A 占了。
+
+新版不会像普通 hashmap 那样直接放进 bucket 链表。
+
+它首先尝试把这里**展开成 Trie**：
+```
+before:
+
+root
+ │
+ └── [3] → entry A
+```
+
+变成：
+```
+after:
+
+root
+ │
+ └── [3] → indirect
+               │
+        ┌──────┴───────┐
+        │              │
+      [10]           [5]
+        │              │
+     entry A         entry B
+```
+
+这个过程就是源码里的：
+```
+expand(...)
+```
+
+源码会重新计算旧 entry 的 hash，然后继续比较后续 4 bit，直到两个 key 的 hash 分叉为止。
+
+比如：
+```
+A = 0011 | 1010 | ...
+B = 0011 | 0101 | ...
+```
+
+第一层：
+```
+0011 == 0011
+```
+冲突。
+
+第二层：
+```
+1010 != 0101
+```
+
+于是：
+```
+             child[3]
+                 │
+             indirect
+              /     \
+          [10]       [5]
+           │          │
+           A          B
+```
+
+如果：
+```
+A = 0011 | 1010 | 1111 | 0010 ...
+B = 0011 | 1010 | 1111 | 1100 ...
+```
+
+那就会连续创建几层：
+```
+root
+ ↓ [3]
+indirect
+ ↓ [10]
+indirect
+ ↓ [15]
+indirect
+ ├─ [2]  → A
+ └─ [12] → B
+```
+直到能够分叉。
+
+但是还有一种更极端的情况：
+```
+hash(A) == hash(B)
+```
+注意这里不是某几位一样，而是**整个 hash 都完全一样**。
+
+那 Trie 已经没办法继续区分了。
+
+于是新版还有：
+```
+overflow atomic.Pointer[entry]
+```
+也就是哈希冲突链表。
+
+源码里：
+```go
+if oldHash == newHash {
+    newEntry.overflow.Store(oldEntry)
+    return &newEntry.node
+}
+```
+
+于是：
+```
+某个 Trie slot
+      │
+      ▼
+   entry B
+      │
+   overflow
+      │
+      ▼
+   entry A
+```
+
+如果再来 C，而且：
+```
+hash(C) == hash(A) == hash(B)
+```
+
+就可能：
+```
+entry C
+   ↓
+entry B
+   ↓
+entry A
+```
+
+所以要区分两种“冲突”：
+```
+hash 前缀相同
+→ 增加 Trie 层级
+
+完整 hash 相同
+→ overflow 链表
+```
+
+这个设计很重要。
+
+再来看 `Store`。
+表面上：
+```
+func (ht *HashTrieMap[K, V]) Store(key K, new V) {
+    _, _ = ht.Swap(key, new)
+}
+```
+真正干活的是 `Swap`。
+
+Store 大致先做：
+```
+计算 hash
+ ↓
+从 root 开始
+ ↓
+按照每 4 bit 寻址
+```
+
+一直找到：
+```
+nil slot
+```
+
+或者：
+```
+entry
+```
+
+例如：
+```
+root
+ │
+ └── child[3] == nil
+```
+意味着这里可以插入。
+
+但是注意：
+> **写操作不能像读操作那样完全不加锁。**
+
+因为你要修改：
+```
+children[index]
+```
+这个树结构。
+
+新版的关键设计不是“写无锁”，而是：
+> **只锁当前需要修改的 indirect 节点，而不是锁整个 Map。**
+
+每个 `indirect` 自己带一个：
+```
+mu Mutex
+```
+
+源码明确写着：
+```go
+mu Mutex // Protects mutation to children ...
+```
+
+所以假设：
+```
+                      root
+               /                \
+            node A              node B
+          /      \            /      \
+       ...       ...        ...       ...
+```
+
+goroutine 1 修改左边：
+```
+node A.mu
+```
+
+goroutine 2 修改右边：
+```
+node B.mu
+```
+理论上它们不需要竞争同一把全局锁。
+
+这就是新版相较于：
+```
+map + RWMutex
+```
+很重要的并发优势。
+
+可以理解成：
+```
+旧式全局锁：
+
+           Map
+            │
+            μ
+       ┌────┼────┐
+       A    B    C
+
+改 A、改 B 都抢 μ
+```
+
+新版：
+```
+              root
+            /      \
+          IA        IB
+         μA         μB
+        /             \
+       A               B
+```
+不同分支可以锁不同节点。
+所以锁粒度明显更细。
+
+但是为什么源码中写操作会有：
+```
+先无锁查
+↓
+再加锁
+↓
+重新检查
+```
+
+例如：
+```
+i.mu.Lock()
+n = slot.Load()
+
+if (n == nil || n.isEntry) && !i.dead.Load() {
+    break
+}
+
+i.mu.Unlock()
+// retry
+```
+这是典型的：
+> **optimistic traversal + lock + validation**
+
+也就是“乐观查找，然后加锁确认”。
+假设两个 goroutine：
+```
+G1
+G2
+```
+
+都看到：
+```
+child[3] == nil
+```
+
+G1：
+```
+看到 nil
+↓
+准备插入 A
+```
+
+G2：
+```
+看到 nil
+↓
+准备插入 B
+```
+
+如果直接写：
+```
+G1: child[3] = A
+G2: child[3] = B
+```
+显然会覆盖。
+
+所以真正流程：
+```
+G1:
+Load slot → nil
+Lock(node)
+再次 Load slot → nil
+插入 A
+Unlock
+```
+
+G2：
+```
+Load slot → nil
+等待 Lock
+
+拿到锁
+再次 Load slot
+
+发现：
+slot != nil
+
+说明之前看到的状态过期了
+↓
+重新从树开始查
+```
+
+这也是为什么源码里有：
+```
+Grab the lock and double-check what we saw.
+```
+也就是加锁以后重新确认之前观察到的结构仍然有效。
+
+接下来有一个新版设计里非常重要、也很容易忽略的点：
+> **更新已有 value 时，不是修改原来的 `entry.value`。**
+
+比如：
+```
+m.Store("A", 100)
+```
+
+现在：
+```
+entryA:
+key   = A
+value = 100
+```
+
+再：
+```
+m.Store("A", 200)
+```
+
+它不会：
+```
+entryA.value = 200
+```
+因为与此同时可能有 goroutine 正在无锁读取这个 entry。
+
+如果原地修改：
+```
+reader:
+正在读 entryA.value
+
+writer:
+entryA.value = 200
+```
+并发安全问题马上出现。
+
+所以源码的做法是：
+> **创建一个新的 entry，然后原子替换父节点的指针。**
+
+比如：
+```
+before:
+
+child[3]
+   │
+   ▼
+entry A
+value=100
+```
+
+Store(A, 200)：
+```
+创建：
+
+newEntry A
+value=200
+```
+
+然后：
+```
+child[3].Store(newEntry)
+```
+
+最终：
+```
+child[3]
+   │
+   ▼
+newEntry A
+value=200
+```
+
+旧 entry：
+```
+entry A
+value=100
+```
+暂时仍然可能被旧 reader 持有。
+
+但没关系，因为它已经不会改变了。
+
+等没人引用之后：
+```
+GC
+```
+自然回收。
+
+源码里的 `swap` 对头节点就是：
+```go
+e := newEntryNode(key, new)
+...
+return e, head.value, true
+```
+
+而外层最后：
+```
+slot.Store(&e.node)
+```
+也就是替换成新 entry。
+
+这个思想其实非常漂亮：
+```
+reader:
+只读 immutable node
+
+writer:
+不原地改 node
+创建新 node
+原子发布新 node
+```
+你可以把它理解成一定程度上的：
+> **copy-on-write / immutable node 思想。**
+
+不是整个 Map copy-on-write，只是局部节点替换。
+
+这也解释了为什么 `Load` 不需要锁。
+因为 Load 读到：
+```
+oldEntry
+```
+
+即使这时候 writer 已经换成：
+```
+newEntry
+```
+
+也不会出现：
+```
+oldEntry 被改了一半
+```
+旧 entry 本身是不变的。
+
+可能发生的是：
+```
+时间 t1:
+
+reader:
+slot.Load() → oldEntry(value=100)
+
+时间 t2:
+
+writer:
+slot.Store(newEntry(value=200))
+
+时间 t3:
+
+reader:
+读取 oldEntry.value → 100
+```
+这是允许的并发语义。
+
+另一个 reader：
+```
+时间 t4:
+
+slot.Load() → newEntry
+→ 200
+```
+也正常。
+
+这里通过原子 pointer 的发布和 Go memory model 保证同步关系。
+
+新版删除也比旧版直观得多。
+
+旧版需要：
+```
+value
+ ↓
+nil
+ ↓
+expunged
+```
+因为 read 快照不能修改，同时还要维护 dirty。
+
+新版没有两份 Map。
+
+所以删除直接变成：
+```
+把树上的 entry 指针删掉
+```
+
+例如：
+```
+before:
+
+indirect
+ ├─ child[3] → A
+ └─ child[5] → B
+```
+
+Delete(A)：
+```
+indirect.mu.Lock()
+
+child[3].Store(nil)
+
+indirect.mu.Unlock()
+```
+
+于是：
+```
+after:
+
+indirect
+ ├─ child[3] → nil
+ └─ child[5] → B
+```
+
+源码就是：
+```
+slot.Store(nil)
+```
+
+所以新版根本不需要：
+```
+nil
+expunged
+```
+这种逻辑删除状态。
+
+这是你刚刚那个问题和新版之间一个非常好的连接：
+```
+旧版：
+read 无法修改
+dirty 又可能有 entry
+
+所以：
+不能真的立即从所有结构删除
+→ 需要 nil / expunged
+```
+
+而新版：
+```
+只有 Trie
+children 是 atomic.Pointer
+
+所以：
+可以直接把某个 slot 原子置 nil
+```
+结构本身就是并发可更新的。
+
+不过删除还有一个细节：
+如果删除 entry 后，某个中间 indirect 节点变空了怎么办？
+例如：
+```
+root
+ │
+ └── [3] → indirect X
+              │
+              └── [7] → entry A
+```
+
+删除 A：
+```
+root
+ │
+ └── [3] → indirect X
+              │
+              └── [7] → nil
+```
+
+这时候：
+```
+indirect X
+```
+已经完全没用了。
+
+所以源码会向上清理空节点：
+```
+for i.parent != nil && i.empty() {
+    parent := i.parent
+
+    parent.mu.Lock()
+
+    i.dead.Store(true)
+
+    parent.children[index].Store(nil)
+
+    i.mu.Unlock()
+
+    i = parent
+}
+```
+
+大致过程：
+```
+before:
+
+root
+ │
+ └─ X
+     │
+     └─ Y
+         │
+         └─ A
+```
+
+删除 A 后：
+```
+Y empty
+↓
+删除 Y
+```
+
+如果：
+```
+X 也变 empty
+```
+
+继续：
+```
+删除 X
+```
+
+最终：
+```
+root
+```
+保持存在。
+
+源码明确要求：
+```
+root must always be non-nil
+```
+所以 root 不会被删。
+
+这时候你可能会问：
+> 那 `dead` 是干什么的？
+
+这个字段：
+```
+dead atomic.Bool
+```
+非常重要。
+
+假设：
+```
+root
+ │
+ └── X
+      │
+      └── A
+```
+
+G1 正准备往 X 插入 B：
+```
+G1:
+已经通过无锁 traversal 找到了 X
+```
+
+与此同时 G2：
+```
+Delete(A)
+```
+
+删除 A 后：
+```
+X 为空
+```
+
+然后 G2 把：
+```
+root → X
+```
+
+断掉：
+```
+root.child = nil
+```
+此时 G1 手里**仍然握着旧的 X 指针**。
+
+如果 G1不知道 X 已经脱离 Trie：
+```
+G1:
+X.children[...] = B
+```
+
+它可能把 B 插到一个：
+```
+已经不属于整棵树的节点
+```
+里。
+
+这样 B 永远访问不到。
+所以删除 X 时会：
+```
+X.dead.Store(true)
+```
+
+然后 writer 加锁之后必须检查：
+```
+if !i.dead.Load() {
+    // 可以写
+}
+```
+
+如果：
+```
+dead == true
+```
+
+说明：
+> 我刚刚通过无锁 traversal 找到的这个 indirect 已经被其他 goroutine 从树上删除了。
+
+于是：
+```
+放弃
+重新从 root 查
+```
+
+这就是为什么你会在 Store/find 等逻辑看到：
+```
+i.mu.Lock()
+...
+if !i.dead.Load() {
+    ...
+}
+...
+retry
+```
+所以 `dead` 和旧版的 `expunged` 看起来都有一点“删除状态”的感觉，但职责完全不同。
+
+旧版：
+```
+expunged
+=
+entry 已经不属于 dirty
+```
+
+新版：
+```
+indirect.dead
+=
+整个中间 Trie 节点已经脱离当前树
+```
+
+还有一个非常重要的并发设计：**锁是在 indirect 上，而不是 entry 上。**
+例如：
+```
+                  root
+             /            \
+           I1              I2
+         μ1              μ2
+        /  \             /  \
+       A    B           C    D
+```
+
+如果：
+```
+G1: Store(A)
+G2: Store(C)
+```
+
+它们可能分别：
+```
+G1 lock I1
+G2 lock I2
+```
+所以可以并行。
+
+但如果：
+```
+G1: Store(A)
+G2: Delete(B)
+```
+
+A、B 恰好都是同一个 indirect 的直接 child：
+```
+I1
+├── A
+└── B
+```
+
+那么两者都需要：
+```
+I1.mu
+```
+就会串行。
+
+所以新版并不是：
+```
+所有写操作完全无锁
+```
+
+而是：
+```
+读：
+基本无锁
+
+写：
+局部节点锁
+
+不同 Trie 分支：
+可以并发写
+```
+
+这比旧版的一把：
+```
+Map.mu
+```
+在大量 key、写入分散的情况下更容易扩展。
+
+`Clear()` 就更有意思了。
+
+你可能以为要遍历整棵树：
+```
+root
+ ↓
+删除 entry
+ ↓
+删除 indirect
+...
+```
+
+实际上完全不需要。
+源码：
+```go
+func (ht *HashTrieMap[K, V]) Clear() {
+    ht.init()
+    ht.root.Store(newIndirectNode[K, V](nil))
+}
+```
+
+就是：
+```
+old:
+
+root ──→ 巨大 Trie
+```
+
+直接：
+```
+newRoot := empty indirect
+
+root.Store(newRoot)
+```
+
+得到：
+```
+root ──→ empty
+```
+
+旧树：
+```
+old trie
+```
+没有新入口了。
+
+正在读旧树的 goroutine 仍然可以安全完成。
+
+之后：
+```
+GC
+```
+自动回收。
+
+这又体现了新版非常核心的设计哲学：
+> **不要费劲地原地修改共享结构，而是通过 atomic pointer 切换结构。**
+
 
 ## 设计模式
 ### 单例模式
