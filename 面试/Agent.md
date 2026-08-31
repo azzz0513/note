@@ -2051,7 +2051,7 @@ SSE 只能从服务端推向客户端，用户发消息必须走一个独立的 
 
 还有一个实现细节是断线重连。SSE 有内置的重连机制，断线后会自动尝试重连，这是优点。但要做到「断了接着上次继续」而不丢消息，服务端必须支持 `Last-Event-ID`，客户端重连时带上上次收到的最后一条消息 ID，服务端从那条之后重放。很多实现省略了这块，结果断线后用户会丢失中间的内容，重连看到的是截断的回答。
 
-### WebSocket的局限：有状态带来的扩展麻烦
+### WebSocket的局 限：有状态带来的扩展麻烦
 WebSocket 最麻烦的问题是「有状态」。
 
 每条 WebSocket 连接在建立时被负载均衡器路由到某一台后端服务器，之后这个用户的所有消息都必须发到同一台服务器，因为连接状态就保存在那里。
@@ -2087,3 +2087,921 @@ SSE 就不会有这个问题，它始终是普通 HTTP 请求，任何代理都�
 |MCP 远程 Server|Streamable HTTP（内部仍用 SSE 做流式）|MCP 2025-03-26 规范从早期的 HTTP+SSE 双端点升级为单端点的 Streamable HTTP，保留了代理穿透友好的特性|
 绝大多数 LLM 文字对话产品用 SSE 就够了，这也是为什么 OpenAI、Anthropic 的 API 都选 SSE 而不是 WebSocket。WebSocket 的复杂性只有在真正需要双向实时通信时才值得引入。
 ![[Pasted image 20260813225956.png]]
+
+## agent死循环
+所谓Agent死循环，本质上是：
+>Agent 始终无法进入“任务已经完成，可以输出 Final Answer”的终止状态，而是在 Thought → Action → Observation → Thought 之间反复运行。
+
+### 最典型的死循环：重复调用同一个工具
+假设用户：
+```
+帮我查询北京今天的天气
+```
+
+Agent：
+```
+Thought:
+我需要查询北京天气。
+
+Action:
+weather(city="北京")
+
+Observation:
+北京今天 28℃，晴。
+```
+
+正常情况下下一步应该：
+```
+Thought:
+已经获得用户需要的信息。
+
+Final:
+北京今天晴，最高气温28℃。
+```
+
+但模型可能继续：
+```
+Thought:
+为了确认天气信息，我应该查询天气。
+
+Action:
+weather(city="北京")
+
+Observation:
+北京今天 28℃，晴。
+
+Thought:
+我需要确认天气。
+
+Action:
+weather(city="北京")
+
+Observation:
+北京今天 28℃，晴。
+
+...
+```
+
+于是：
+```
+weather
+  ↓
+weather
+  ↓
+weather
+  ↓
+weather
+```
+无限循环。
+
+为什么会这样？
+
+因为 LLM 本质上并不存在程序语言意义上的：
+```
+if taskFinished {
+    break
+}
+```
+
+它只是每轮根据：
+```
+System Prompt
+Conversation
+Previous Actions
+Observations
+```
+
+预测：
+> “下一步最合理的行为是什么？”
+
+如果模型一直认为：
+```
+还需要再确认一次
+```
+循环就不会自然结束。
+
+所以**不能把 Agent 的终止完全交给 LLM 自己决定**。
+
+### 第二种常见情况：工具失败 → 重试 → 失败 → 重试
+例如 Agent 要读取一个文件：
+```
+Action:
+read_file("/data/a.txt")
+
+Observation:
+FileNotFound
+```
+
+模型认为：
+```
+可能刚才调用失败，再试一次。
+```
+
+于是：
+```
+read_file("/data/a.txt")
+    ↓
+FileNotFound
+    ↓
+read_file("/data/a.txt")
+    ↓
+FileNotFound
+    ↓
+read_file("/data/a.txt")
+    ↓
+FileNotFound
+```
+这也是 Agent 中非常典型的死循环。
+
+特别是工具错误信息设计得不好时，比如工具只返回：
+```
+failed
+```
+
+模型不知道：
+```
+是网络问题？
+参数错误？
+权限问题？
+资源不存在？
+临时错误？
+```
+
+它就很容易选择最朴素的策略：
+> 再试一次。
+
+这也是为什么 Agent 工程里 **Tool Observation 的设计非常重要**。
+
+与其：
+```
+{
+  "error": "failed"
+}
+```
+
+更合理的是：
+```
+{
+  "error_type": "FILE_NOT_FOUND",
+  "message": "/data/a.txt does not exist",
+  "retryable": false
+}
+```
+
+这样模型就更容易知道：
+```
+retryable=false
+```
+
+意味着：
+> 再调用 100 次也不会成功，应该换策略或者告诉用户。
+
+### 第三种情况：Agent在两个状态之间来回震荡
+这个比单纯重复一个工具更隐蔽。
+
+例如：
+```
+Search → Read → Search → Read → Search → Read
+```
+
+用户：
+```
+帮我分析 OpenAI 最近的 Agent 技术。
+```
+
+Agent：
+```
+① Search("OpenAI Agent")
+      ↓
+② 找到文章A
+      ↓
+③ Read(A)
+      ↓
+④ 觉得资料不够
+      ↓
+⑤ Search("OpenAI Agent")
+      ↓
+⑥ 又找到文章A
+      ↓
+⑦ Read(A)
+      ↓
+...
+```
+单独看每一步都是“合理”的。
+
+但整体上：
+```
+Search
+ ↓
+Read
+ ↓
+Search
+ ↓
+Read
+```
+没有产生新的信息。
+
+这种情况可以称为 **lack of progress / no-progress loop**。
+
+这是实际 Agent 系统里比：
+```
+tool A
+tool A
+tool A
+tool A
+```
+更难检测的问题。
+
+因为不能简单判断：
+```
+if currentTool == previousTool {
+    break
+}
+```
+
+它实际上可能是：
+```
+A → B → A → B → A → B
+```
+
+甚至：
+```
+A → B → C → A → B → C
+```
+形成周期循环。
+
+### 第四种情况：多个Agent互相踢足球
+Multi-Agent 系统尤其容易出现。
+
+比如：
+```
+Manager Agent
+      ↓
+Coder Agent
+      ↓
+Reviewer Agent
+```
+
+Manager：
+```
+请 Coder 修改代码
+```
+
+Coder：
+```
+修改完成，请 Reviewer 检查
+```
+
+Reviewer：
+```
+这里还有问题，请 Coder 修改
+```
+
+Coder：
+```
+修改完成，请 Reviewer 检查
+```
+
+Reviewer：
+```
+还有问题
+```
+
+于是：
+```
+Coder
+  ↓
+Reviewer
+  ↓
+Coder
+  ↓
+Reviewer
+  ↓
+...
+```
+
+甚至更经典：
+```
+Agent A:
+这个问题应该让 Agent B 处理。
+
+Agent B:
+这个问题应该让 Agent A 处理。
+```
+
+变成：
+```
+A → B → A → B → A → B
+```
+所以 Multi-Agent 里的死循环不仅是 Tool Loop，还有 **Agent Handoff Loop**。
+
+### 第五种情况：目标本身没有明确的完成条件
+例如用户说：
+```
+帮我把这个方案优化到最好。
+```
+“最好”是什么？
+没有明确标准。
+
+Agent可能：
+```
+生成方案
+ ↓
+检查
+ ↓
+发现还能优化
+ ↓
+修改
+ ↓
+检查
+ ↓
+发现还能优化
+ ↓
+修改
+ ↓
+...
+```
+
+因为永远可以：
+> 再优化一点。
+
+如果任务目标是：
+```
+找到最好的方案
+```
+
+模型实际上很难证明：
+```
+当前方案 = 全局最优
+```
+于是很容易产生无限 Refinement Loop。
+
+所以实际 Agent 系统中非常重要的一个设计原则是：
+> **任务不仅需要 Goal，还应该尽可能存在 Termination Condition / Success Criteria。**
+
+例如不要只有：
+```
+Goal:
+优化 SQL
+```
+
+而是：
+```
+Goal:
+优化 SQL
+
+Success Criteria:
+1. EXPLAIN 不出现全表扫描
+2. 查询耗时 < 500ms
+3. 不修改业务语义
+4. 最多进行 3 轮优化
+```
+
+这样 Agent 才知道什么时候应该停止。
+
+### 实际Agent系统怎么防止死循环
+真正工程上不能只靠 Prompt：
+```
+不要死循环。
+```
+这只能降低概率，不能作为可靠保障。
+
+一般会形成多层防御。
+
+最基础的一层就是：
+**Maximum Steps / Maximum Iterations。**
+
+例如：
+```go
+const maxSteps = 20
+
+for step := 0; step < maxSteps; step++ {
+    action := agent.Next(state)
+    if action.Type == "final" {
+        return action.Result
+    }
+    
+    observation := execute(action)
+
+    state.Add(action, observation)
+}
+
+return ErrMaxStepsExceeded
+```
+
+也就是：
+```
+Agent Loop
+   ↓
+step++
+   ↓
+step > 20 ?
+   ↓ YES
+强制终止
+```
+这是最重要的兜底机制。
+
+无论模型怎么抽风：
+```
+Search
+Search
+Search
+Search
+...
+```
+
+最多：
+```
+20 steps
+```
+一定停止。
+
+所以可以把它理解成 Agent 的：
+```
+保险丝
+```
+
+但是 Maximum Steps 只能保证：
+> **死循环最终会停。**
+
+不能保证：
+> **系统能够聪明地识别自己正在死循环。**
+
+因此实际还需要第二层。
+
+### 重复Action检测
+例如记录：
+```
+Action History
+
+1 search("golang map")
+2 search("golang map")
+3 search("golang map")
+```
+
+可以计算一个 Action Signature：
+```
+signature =
+    tool_name +
+    normalized_arguments
+```
+
+例如：
+```
+search|query=golang map
+```
+
+如果：
+```
+sameActionCount >= 3
+```
+
+直接判断：
+```
+Repeated Action Detected
+```
+
+然后不是一定马上结束，也可以给模型反馈：
+```
+SYSTEM:
+You have executed the same action 3 times
+without obtaining new information.
+
+Do not repeat this action.
+Choose another strategy or terminate.
+```
+
+然后让模型重新规划：
+```
+重复调用
+   ↓
+Loop Detector
+   ↓
+检测到重复
+   ↓
+Reflection / Replan
+   ↓
+换策略
+```
+
+如果 Replan 后还重复：
+```
+强制终止
+```
+这比单纯 `maxSteps` 更合理。
+
+### 仅检测”相同Action“仍然不够，要检测有没有Progress
+这是 Agent 工程里更重要的一层。
+
+比如：
+```
+search("Go GC")
+read(pageA)
+search("Go GC")
+read(pageA)
+```
+
+Action 并不连续相同：
+```
+Search != Read
+```
+
+但：
+```
+Observation
+```
+实际上一直没变化。
+
+所以可以维护：
+```
+State / Evidence / Completed Subgoals
+```
+
+例如任务规划成：
+```
+Goal: 调研某技术
+
+Todo:
+[x] 找官方文档
+[x] 找论文
+[ ] 总结优缺点
+[ ] 输出报告
+```
+
+每一步之后判断：
+```
+Before:
+completed = 2
+
+After:
+completed = 2
+```
+
+连续很多步：
+```
+2 → 2 → 2 → 2
+```
+说明没有 progress。
+
+这时候触发：
+```
+No Progress Detected
+```
+
+让 Agent：
+```
+重新规划
+或者
+终止
+```
+
+这比单纯检测 Tool Name 高级很多。
+
+### 实际系统还会限制”预算“
+Agent 最大的问题不只是无限循环。
+
+每一次循环实际上都可能产生：
+```
+LLM Token
+Tool API
+数据库查询
+搜索请求
+浏览器操作
+```
+因此 Agent Loop 通常还会设置 Budget。
+
+例如：
+```
+max_steps      = 30
+max_tokens     = 100000
+max_time       = 120s
+max_tool_calls = 20
+max_cost       = $1
+```
+
+形成：
+```
+                   Agent Loop
+                       ↓
+          ┌────────────┼─────────────┐
+          ↓            ↓             ↓
+        Step         Token          Time
+       Budget        Budget         Budget
+          ↓            ↓             ↓
+       超过任意一个阈值
+              ↓
+            Stop
+```
+
+所以严格来说，不应该只有：
+```
+maxIterations
+```
+而应该是一个完整的 **Execution Budget**。
+
+尤其是生产系统，因为死循环意味着的不只是请求卡住，还可能意味着**无限烧 Token 和 API 费用**。
+
+### Retry本身也必须有边界
+前面说过：
+```
+Tool → Error → Retry
+```
+非常容易形成循环。
+
+所以一般会把错误分成两类：
+```
+Retryable Error
+Non-Retryable Error
+```
+
+例如：
+```
+HTTP 500
+HTTP 502
+HTTP 503
+Timeout
+```
+
+可能：
+```
+retryable = true
+```
+
+而：
+```
+HTTP 400
+参数非法
+文件不存在
+权限不足
+```
+
+通常：
+```
+retryable = false
+```
+
+对于 retryable：
+```
+第一次失败
+ ↓
+等待 1s
+
+第二次失败
+ ↓
+等待 2s
+
+第三次失败
+ ↓
+等待 4s
+
+仍然失败
+ ↓
+停止重试
+```
+也就是你在分布式系统里很熟悉的：
+**Exponential Backoff + Max Retry。**
+
+而且通常还应该加入 jitter，避免大量 Agent 同时重试造成惊群：
+```
+delay = min(base * 2^retry, maxDelay) + jitter
+```
+
+所以这里其实和传统后端容错设计完全连起来了。
+
+### 把”执行“和”监督“分开
+如果 Agent 比较复杂，可以引入一个 Supervisor / Controller。
+
+例如：
+```
+                  User Goal
+                      ↓
+                  Controller
+                      ↓
+               ┌─────────────┐
+               │ Agent / LLM │
+               └─────────────┘
+                      ↓
+                    Action
+                      ↓
+                     Tool
+                      ↓
+                 Observation
+                      ↓
+                  Controller
+                 /     |      \
+                /      |       \
+             继续     Replan    Stop
+```
+
+Controller 不一定完全由 LLM 实现。
+
+最好其中一部分是**确定性代码**：
+```go
+if steps > maxSteps {
+    stop()
+}
+
+if elapsed > maxDuration {
+    stop()
+}
+
+if cost > maxCost {
+    stop()
+}
+
+if sameActionCount > 3 {
+    replan()
+}
+
+if retryCount > maxRetry {
+    stop()
+}
+```
+
+然后 LLM 负责更语义化的判断：
+```
+当前任务是否已经完成？
+
+最近5个步骤是否产生了新的有效信息？
+
+当前策略是不是已经失败？
+
+是否应该改变计划？
+```
+
+这其实形成：
+```
+确定性规则
++
+LLM语义判断
+```
+两层控制。
+
+这种方式比：
+```
+让LLM自己决定什么时候停
+```
+
+可靠得多。
+
+### 如果是 Plan-and-Execute Agent，还可以通过任务状态机解决
+比如用户：
+```
+帮我调查某家公司并生成报告
+```
+
+Planner：
+```
+Task 1：搜索公司基本资料
+Task 2：查询财务信息
+Task 3：查询竞争对手
+Task 4：总结
+Task 5：生成报告
+```
+
+状态：
+```
+Task1  DONE
+Task2  DONE
+Task3  RUNNING
+Task4  PENDING
+Task5  PENDING
+```
+
+Executor 每次只能：
+```
+PENDING → RUNNING → DONE
+                 ↘ FAILED
+```
+
+而不能无限：
+```
+RUNNING → RUNNING → RUNNING...
+```
+
+比如规定：
+```
+Task3:
+    maxAttempts = 3
+```
+
+失败三次：
+```
+Task3 → FAILED
+```
+
+Planner 决定：
+```
+跳过
+重新规划
+询问用户
+终止任务
+```
+
+这样 Agent 从一个：
+```
+自由循环
+```
+
+变成：
+```
+受状态机约束的循环
+```
+
+工程可靠性会高很多。
+
+### 所以一个生产级 Agent Loop 大概应该长这样
+可以把前面这些机制合起来：
+```
+                    User Goal
+                        ↓
+                      Plan
+                        ↓
+                ┌──────────────┐
+                │    Agent     │
+                └──────────────┘
+                        ↓
+                     Action
+                        ↓
+                 ┌────────────┐
+                 │ Guardrails │
+                 └────────────┘
+                   ↓    ↓    ↓
+               重复？ 超预算？ 合法？
+                        ↓
+                       Tool
+                        ↓
+                   Observation
+                        ↓
+                Progress Check
+                  /          \
+                有            无
+                ↓             ↓
+             Continue      Replan
+                              ↓
+                        多次仍无进展
+                              ↓
+                             Stop
+```
+
+外面还有一层硬限制：
+```
+Max Steps
+Max Time
+Max Tokens
+Max Cost
+Max Tool Calls
+Max Retries
+```
+
+所以真正生产环境中的设计思想是：
+> **LLM 可以决定“下一步想做什么”，但不能拥有无限执行权。**
+
+这一点非常关键。
+
+你可以把 Agent 理解成一个不完全可信的决策器：
+```
+LLM
+ ↓
+提出 Action
+```
+
+而真正掌握执行权的是：
+```
+Agent Runtime / Orchestrator
+```
+
+Runtime 负责：
+```
+循环控制
+预算控制
+超时控制
+重试控制
+重复检测
+状态管理
+权限检查
+终止条件
+```
+
+因此最终架构更接近：
+```
+             ┌──────────────────┐
+             │ Agent Runtime    │
+             │                  │
+             │  Max Steps       │
+             │  Timeout         │
+             │  Budget          │
+             │  Loop Detection  │
+             │  State Machine   │
+             └────────┬─────────┘
+                      │
+             ┌────────▼─────────┐
+             │       LLM        │
+             │  决定下一步Action │
+             └────────┬─────────┘
+                      │
+             ┌────────▼─────────┐
+             │      Tools       │
+             └──────────────────┘
+```
+这和传统后端系统其实有一个很相似的思想：**不要假设内部组件永远行为正确，而是在外围设置 timeout、retry budget、circuit breaker、rate limit、resource quota。**
