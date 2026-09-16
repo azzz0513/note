@@ -1043,6 +1043,453 @@ _注：Good 方案中，`a` 和 `c` 占用了前2个字节，后面补2字节
 - **Go**: 这是一个弱点。Go 依靠惯例。你可以使用 _ 忽略错误（虽然不推荐），编译器不会强制你检查 err != nil。
 - **Java (Checked Exception)**: 强制捕获，但导致代码非常啰嗦，后来很多语言（C#, Python, Unchecked Java）都放弃了强制检查。
 
+### panic、fatal、error
+
+| 类型    | 本质            | 是否终止当前正常流程 | 能否recover | 常见场景              |
+| ----- | ------------- | ---------- | --------- | ----------------- |
+| error | 普通接口值         | 不一定        | 不需要       | 可预期的业务/运行错误       |
+| panic | 运行时异常机制       | 是          | 可以        | 程序不变量被破坏、严重编程错误   |
+| fatal | runtime直接终止进程 | 是          | 不可以       | runtime判断程序无法安全继续 |
+它们大致可以理解为三条完全不同的路径：
+```
+error
+  ↓
+返回给调用者
+  ↓
+调用者决定怎么办
+
+
+panic
+  ↓
+栈展开
+  ↓
+执行 defer
+  ↓
+可以 recover
+  ↓
+如果没人 recover → 程序退出
+
+
+runtime fatal
+  ↓
+runtime 直接终止程序
+  ↓
+不能 recover
+```
+
+#### error本质只是一个普通接口
+Go 中：
+```go
+type error interface {
+    Error() string
+}
+```
+
+所以 `error` 本质上和：
+```go
+io.Reader
+fmt.Stringer
+```
+一样，只是一个 interface。
+
+例如：
+```go
+func readConfig() error {
+    data, err := os.ReadFile("config.yaml")
+    if err != nil {
+        return err
+    }
+
+    _ = data
+    return nil
+}
+```
+
+调用者：
+```go
+err := readConfig()
+if err != nil {
+    fmt.Println(err)
+}
+```
+
+关键点在于：
+> **出现 `error` 后，Go runtime 什么都不会自动做。**
+
+比如：
+```go
+err := doSomething()
+
+// 你甚至可以不处理
+_ = err
+
+fmt.Println("continue")
+```
+程序照样继续运行。
+
+因此 `error` 主要表示：
+> **程序运行过程中可以预期、可以处理的失败。**
+
+例如：
+```
+文件不存在
+网络请求失败
+数据库连接失败
+参数非法
+用户不存在
+超时
+权限不足
+```
+这些事情完全可能发生，不意味着程序自身已经进入异常状态。
+
+例如：
+```go
+user, err := GetUser(id)
+if errors.Is(err, ErrUserNotFound) {
+    return nil
+}
+```
+
+“用户不存在”就是正常业务分支之一。
+
+#### panic不再是普通返回值，而是控制流机制
+例如：
+```go
+func f() {
+    panic("something wrong")
+}
+```
+
+执行到这里后：
+```
+正常代码
+  ↓
+panic(...)
+  ↓
+当前函数停止正常执行
+  ↓
+开始栈展开
+```
+
+例如：
+```go
+func A() {
+    fmt.Println("A start")
+    B()
+    fmt.Println("A end")
+}
+
+func B() {
+    fmt.Println("B start")
+    C()
+    fmt.Println("B end")
+}
+
+func C() {
+    panic("boom")
+}
+```
+
+调用栈：
+```
+main
+ ↓
+A
+ ↓
+B
+ ↓
+C
+ ↓
+panic
+```
+
+panic 发生后：
+```
+C 停止正常执行
+↑
+退出 C
+↑
+退出 B
+↑
+退出 A
+↑
+退出 main
+```
+
+因此：
+```
+B end
+A end
+```
+都不会执行。
+
+**但panic在栈展开过程中会执行defer**
+这是 `panic` 和 `fatal` 一个非常关键的区别。
+
+例如：
+```go
+func B() {
+    defer fmt.Println("B defer")
+
+    C()
+}
+
+func C() {
+    defer fmt.Println("C defer")
+
+    panic("boom")
+}
+```
+
+执行过程：
+```
+C
+│
+├── panic
+│
+├── C defer
+│
+↑
+B
+│
+├── B defer
+│
+↑
+main
+```
+
+所以你经常会看到：
+```go
+f, err := os.Open(...)
+if err != nil {
+    return err
+}
+defer f.Close()
+```
+
+如果后面发生 panic，栈展开过程中 `f.Close()` 仍然有机会执行。
+
+**recover**可以拦截panic
+例如：
+```go
+func f() {
+    defer func() {
+        if r := recover(); r != nil {
+            fmt.Println("recover:", r)
+        }
+    }()
+
+    panic("boom")
+}
+```
+
+输出：
+```
+recover: boom
+```
+程序不会因为这个 panic 直接退出。
+
+因此：
+```
+panic
+  ↓
+开始 unwind
+  ↓
+执行 defer
+  ↓
+defer 中 recover()
+  ↓
+恢复正常控制流
+```
+但要注意，recover 之后不是回到 `panic` 那一行继续执行。
+
+例如：
+```go
+func f() {
+    defer func() {
+        recover()
+    }()
+
+    fmt.Println("A")
+
+    panic("boom")
+
+    fmt.Println("B")
+}
+```
+`B` 不会执行。
+
+可以理解成：
+```
+f()
+
+A
+↓
+panic
+↓
+defer
+↓
+recover
+↓
+f 返回
+↓
+调用 f 的地方继续
+```
+
+##### 哪些东西会触发panic
+除了主动：
+```go
+panic(...)
+```
+runtime 也会把很多运行时错误表现为 panic。
+
+例如数组越界：
+```go
+a := []int{1, 2, 3}
+
+fmt.Println(a[10])
+```
+
+会出现类似：
+```
+panic: runtime error: index out of range
+```
+这种通常是可以 `recover` 的。
+
+再比如：
+```go
+var p *int
+fmt.Println(*p)
+```
+nil pointer dereference 通常也是 runtime panic。
+
+所以不要把：
+```
+runtime 产生的错误
+```
+
+和：
+```
+runtime fatal
+```
+混为一谈。
+
+runtime 可以产生 **panic**，也可以产生 **fatal**。
+
+#### fatal和panic最大区别：它不是给业务代码恢复的
+以并发map为例：
+```go
+m := map[int]int{}
+
+go func() {
+    for {
+        m[1] = 1
+    }
+}()
+
+go func() {
+    for {
+        m[1] = 2
+    }
+}()
+```
+
+可能出现：
+```
+fatal error: concurrent map writes
+```
+
+你可能会想：
+```go
+defer func() {
+    if r := recover(); r != nil {
+        fmt.Println("recover")
+    }
+}()
+```
+能不能救？
+
+**不能。**
+
+因为它走的不是：
+```
+panic → defer → recover
+```
+这条机制。
+
+而是 runtime 判断：
+> 程序已经违反了某些 runtime 约束，不允许继续执行。
+
+因此直接终止。
+
+#### log.Fatal又是什么？
+还有一个名字非常容易让人误解：
+```go
+log.Fatal(...)
+```
+
+例如：
+```go
+log.Fatal("database connection failed")
+```
+
+这个 `Fatal` 和：
+```
+fatal error: concurrent map writes
+```
+**不是同一种机制。**
+
+`log.Fatal` 本质上相当于：
+```
+fmt/log 输出错误
+↓
+os.Exit(1)
+```
+
+也就是：
+```go
+func Fatal(v ...any) {
+    Print(v...)
+    os.Exit(1)
+}
+```
+
+因此：
+```go
+func main() {
+    defer fmt.Println("defer")
+
+    log.Fatal("boom")
+}
+```
+这个 `defer` **不会执行**。
+
+因为 `os.Exit` 会直接结束进程，不进行正常的栈展开。
+
+所以这里其实有三个东西：
+```
+panic("xxx")
+        │
+        ├── Go panic 机制
+        ├── 执行 defer
+        └── 可以 recover
+
+
+runtime fatal
+        │
+        ├── runtime 内部机制
+        ├── 程序终止
+        └── 不可 recover
+
+
+log.Fatal(...)
+        │
+        ├── 标准库 log 包
+        ├── 打日志
+        └── os.Exit(1)
+```
+不要因为它们都出现 `fatal` 这个单词就认为是一个东西。
+
 ### Panic和Recover
 Go 也有类似异常的机制，叫 **Panic（恐慌）** 和 **Recover（恢复）**，但它们的用途完全不同。
 - **其他语言**: 异常用于处理文件找不到、网络超时等**常规错误**。
@@ -2427,6 +2874,14 @@ func (m *ShardedMap) Set(key string, value int) {
 }
 ```
 
+- 让一个goroutine独占map，其他goroutine通过channel请求它读写：
+```
+G1 ─┐
+G2 ─┼── channel ──> Owner Goroutine ──> map
+G3 ─┘
+```
+这样map本身始终只有一个goroutine操作，自然不存在并发读写。
+
 ### Map的key一定要可比较吗
 Map的key必须要可比较
 首先，Map会对我们提供的Key进行哈希运算，得到一个哈希值。这个哈希值决定了这个键值对大概存储在哪个位置（哪个桶）。然而，不同的key可能会产生相同的哈希值，这就是“哈希冲突”。当多个Key被定位到一个桶里，Map就没法只靠哈希值来进行区分。此时，它必须在桶内进行逐个遍历，用我们传入的Key和桶里已有的每一个Key进行比较。这样才能确保我们操作的是正确的键值对。
@@ -2760,9 +3215,523 @@ type smallMap struct {
 ![[images/Pasted image 20251114101756.png]]
 
 ### Map可以边遍历边删除吗
-map不是并发安全的数据结构。如果多个goroutine边遍历，边删除，同时读写一个map是未定义的行为，如果被检测到，会直接panic。
+map不是并发安全的数据结构。如果多个goroutine边遍历，边删除，同时读写一个map是未定义的行为，如果被检测到，会直接触发运行时错误（Fatal）。
 
 如果在同一个goroutine内边遍历边删除，并不会检测到同时读写，理论上是可以进行的。但是遍历的结果就可能不是相同的了，有可能遍历结果集中包含了删除的key，也有可能不包含，这取决于删除key的时间：是在遍历到key所在的bucket时刻前或后。
+
+### Map并发读写会发生什么问题
+**多个goroutine只读同一个map没问题；只要存在写操作，同时还有其他goroutine读或写，就不能直接使用普通map**
+
+例如：
+```go
+m := make(map[int]int)
+
+go func() {
+    for {
+        m[1] = 100
+    }
+}()
+
+go func() {
+    for {
+        fmt.Println(m[1])
+    }
+}()
+```
+
+这里一个 goroutine 写：
+```
+m[1] = 100
+```
+
+另一个 goroutine 读：
+```
+m[1]
+```
+
+可能直接触发运行时错误：
+```
+fatal error: concurrent map read and map write
+```
+
+而如果两个 goroutine 都写：
+```go
+go func() {
+    m[1] = 100
+}()
+
+go func() {
+    m[2] = 200
+}()
+```
+
+可能出现：
+```
+fatal error: concurrent map writes
+```
+这里需要特别注意：**即使两个 goroutine 操作的是不同 key，也不安全。**
+
+比如：
+```go
+go func() {
+    m["A"] = 1
+}()
+
+go func() {
+    m["B"] = 2
+}()
+```
+
+很多人第一反应是：
+> A 和 B 是不同的 key，应该不会操作同一块数据吧？
+
+但 `map` 的写操作不仅仅是在“修改 value”。
+
+以 Go map 的实现来说，插入过程中可能涉及：
+- 查找目标位置
+- 修改槽位
+- 更新 map 元数据
+- bucket/group 扩容
+- 数据迁移
+- 更新控制信息
+- 修改元素数量
+
+所以：
+```
+goroutine A
+    │
+    └── 写 key=A
+          │
+          ├── 修改 map 内部结构
+          └── 可能触发扩容
+
+goroutine B
+    │
+    └── 写 key=B
+          │
+          ├── 修改 map 内部结构
+          └── 可能同时观察/修改同一内部状态
+```
+即使 key 不同，也不能认为两个操作彼此独立。
+
+### 既然map内部已经有检测并发写的状态，为什么Go不干脆把整个机制改成锁，让map天生线程安全？
+Go的设计选择可以概括为一句话：
+>普通 `map` 追求低开销的单线程/外部同步访问；是否需要并发同步，由调用者决定，而不是让所有 `map` 都无条件承担锁的成本。
+
+假设把 map 内部的并发写检测极度简化成：
+```go
+if m.writing {
+    fatal("concurrent map writes")
+}
+
+m.writing = true
+
+// 修改 map
+
+m.writing = false
+```
+
+它和互斥锁：
+```go
+mu.Lock()
+
+// 修改 map
+
+mu.Unlock()
+```
+看起来非常像，但实际上有本质区别。
+
+#### writing只是发现冲突，不是解决冲突
+假设两个 goroutine：
+```
+G1                         G2
+
+检查 writing=false
+设置 writing=true
+开始修改 map
+                           检查 writing=true
+                           ↓
+                           fatal
+```
+
+runtime 的目标只是：
+> “你正在错误地并发操作 map，我尽量发现，然后终止程序。”
+
+而如果使用 Mutex：
+```
+G1                         G2
+
+Lock()
+开始修改
+                           Lock()
+                           ↓
+                           阻塞
+修改完成
+Unlock()
+                           ↓
+                           被唤醒
+                           开始修改
+```
+
+锁必须提供完整的同步语义，包括：
+- 原子地竞争锁
+- 竞争失败后等待
+- goroutine 阻塞/唤醒
+- happens-before 内存顺序保证
+- 饥饿等竞争问题处理
+- 解锁后选择/唤醒等待者
+
+所以：
+```
+并发检测：
+发现你做错了 → 程序退出
+
+Mutex：
+发现冲突 → 等待 → 调度 → 唤醒 → 保证内存可见性 → 继续执行
+```
+后者明显重得多。
+
+更重要的是，map 的检测标志本身并不是一个可以直接拿来当 mutex 用的完整同步原语。
+
+#### 如果普通map自带锁，所有map都要支付成本
+大量 Go 程序中的 map 根本没有并发访问。
+
+例如：
+```go
+func count(s string) map[rune]int {
+    m := make(map[rune]int)
+
+    for _, c := range s {
+        m[c]++
+    }
+
+    return m
+}
+```
+
+整个 `m` 可能从头到尾只被一个 goroutine 使用。
+
+如果 map 天生线程安全，那么：
+```
+m[c]++
+```
+即使程序明明没有并发，也可能需要承担同步相关成本。
+
+而 map 是非常基础的数据结构：
+```
+map[string]int
+map[int]*User
+map[string]interface{}
+```
+它的操作频率可能极高。
+
+Go 更倾向于：
+```
+普通场景
+
+map
+↓
+不需要锁
+↓
+尽可能低成本
+
+
+并发场景
+
+map + Mutex
+或者
+sync.Map
+↓
+明确支付同步成本
+```
+也就是所谓的 **pay for what you use**。
+
+#### 更关键的问题：给每个map操作加锁，也解决不了很多业务级并发问题
+这是我认为最重要的一点。
+
+假设 Go 把：
+```go
+v := m[k]
+```
+
+和：
+```go
+m[k] = v
+```
+都做成线程安全。
+
+那么下面代码安全了吗？
+```go
+if m["count"] < 100 {
+    m["count"]++
+}
+```
+**仍然不安全。**
+
+因为这是一个复合操作。
+
+两个 goroutine 可能这样执行：
+```
+初始：
+
+count = 99
+
+
+G1                              G2
+
+读取 count
+↓
+99
+
+                                读取 count
+                                ↓
+                                99
+
+判断 99 < 100                   判断 99 < 100
+true                            true
+
+count = 100
+                                count = 100
+```
+
+虽然每一个单独的：
+```
+map read
+map write
+```
+
+都是线程安全的，但：
+```
+read
+  ↓
+判断
+  ↓
+write
+```
+整体不是原子的。
+
+再比如：
+```go
+if _, ok := m[userID]; !ok {
+    m[userID] = createUser()
+}
+```
+
+即使 map 自带锁，也可能：
+```
+G1                              G2
+
+Load → 不存在
+                                Load → 不存在
+
+createUser()
+                                createUser()
+
+Store
+                                Store
+```
+于是 `createUser()` 执行两次。
+
+最终你还是需要：
+```go
+mu.Lock()
+defer mu.Unlock()
+
+if _, ok := m[userID]; !ok {
+    m[userID] = createUser()
+}
+```
+也就是说，真正需要同步的往往不是：
+> “一次 map 操作”
+
+而是：
+> **一段具有业务不变量的临界区。**
+
+这也是为什么把锁放在调用者这一层通常更合理。
+
+#### 外部锁可以表达”我要保护哪些东西“，map内部锁做不到
+假设有：
+```go
+type UserManager struct {
+    users map[int]*User
+    count int
+}
+```
+
+业务要求：
+```go
+count == len(users)
+```
+
+每次新增用户：
+```go
+users[id] = user
+count++
+```
+
+如果 map 自带锁：
+```go
+users[id] = user   // map 内部 lock/unlock
+
+count++            // 不受 map 的锁保护
+```
+还是可能出现不一致。
+
+正确做法应该是：
+```go
+mu.Lock()
+
+users[id] = user
+count++
+
+mu.Unlock()
+```
+
+这里 Mutex 保护的不是：
+```
+users 这个 map
+```
+
+而是保护一个更高层的不变量：
+```
+users + count
+```
+
+甚至可能是：
+```
+users
+sessions
+connections
+onlineCount
+```
+一起保持一致。
+
+所以锁的归属通常应该是：
+```
+业务状态
+  │
+  ├── map A
+  ├── map B
+  ├── counter
+  └── other state
+
+        ↑
+     一个 Mutex
+```
+
+而不是：
+```
+map A → 自己一个锁
+map B → 自己一个锁
+```
+
+这也是普通 map 不内置同步的一个非常重要的设计理由。
+
+#### ”线程安全 map“到底应该提供什么语义，本身就不是一个简单问题
+假设 map 自带锁。
+
+对于：
+```go
+v := m[k]
+```
+比较简单。
+
+但是：
+```go
+for k, v := range m {
+    ...
+}
+```
+怎么办？
+
+一种方案是：
+```
+整个 range 期间持有读锁
+```
+
+那么：
+```go
+for k, v := range m {
+    // 执行很慢的操作
+}
+```
+可能导致 writer 长时间无法修改 map。
+
+另一种方案：
+```
+每读取一个元素
+Lock
+Read
+Unlock
+```
+那么遍历期间其他 goroutine 修改 map 后，你看到的是怎样的快照？
+
+例如：
+```
+开始 range
+
+读到：
+A=1
+B=2
+
+另一个 goroutine：
+删除 C
+新增 D
+
+继续 range
+```
+
+那最终应该看到：
+```
+A B C
+```
+
+还是：
+```
+A B D
+```
+
+还是：
+```
+A B
+```
+？
+
+这已经涉及并发容器的**一致性语义**。
+
+这也是为什么 `sync.Map` 并不是简单地：
+```go
+type Map struct {
+    mu sync.Mutex
+    m  map[any]any
+}
+```
+
+它提供了自己的一套并发操作，例如：
+```
+Load
+Store
+LoadOrStore
+LoadAndDelete
+CompareAndSwap
+CompareAndDelete
+Range
+```
+
+注意 `LoadOrStore` 非常有代表性：
+```go
+actual, loaded := m.LoadOrStore(key, value)
+```
+
+它把：
+```
+检查 key 是否存在
+        +
+不存在则写入
+```
+变成一个并发语义明确的操作。
+
+这就是并发容器真正需要考虑的问题，而不只是“塞一把锁进去”。
 
 ## Channel
 ### ==什么是CSP==
@@ -7673,6 +8642,223 @@ GC
 这又体现了新版非常核心的设计哲学：
 > **不要费劲地原地修改共享结构，而是通过 atomic pointer 切换结构。**
 
+### sync.Map的range遍历期间，另一个goroutine删除或更新map会怎么样
+假设：
+```go
+var m sync.Map
+
+m.Store("A", 1)
+m.Store("B", 2)
+m.Store("C", 3)
+```
+
+一个 goroutine 正在：
+```go
+m.Range(func(key, value any) bool {
+    fmt.Println(key, value)
+    return true
+})
+```
+
+与此同时另一个 goroutine：
+```go
+m.Delete("B")
+m.Store("C", 30)
+m.Store("D", 4)
+```
+那么 `Range` 最终看到什么，**没有唯一答案**。
+
+官方文档明确说明：`Range` 不一定对应 `Map` 内容的某个一致快照；同一个 key 不会被访问超过一次，但如果某个 key 在 `Range` 期间被 `Store` 或 `Delete`，`Range` 可能看到这个 key 在整个遍历期间任意时刻对应的映射状态。并且 `Range` 不会阻塞其他 `sync.Map` 操作。
+
+比如上面的例子，可能看到：
+```
+A = 1
+B = 2
+C = 3
+```
+
+也可能：
+```
+A = 1
+C = 30
+D = 4
+```
+
+甚至可能：
+```
+A = 1
+B = 2
+C = 30
+```
+具体取决于并发发生的时序。
+
+**这里有几个细节非常值得区分。**
+
+假设初始：
+```
+A=1
+B=2
+C=3
+```
+
+G1 开始：
+```go
+m.Range(...)
+```
+
+G2 此时：
+```go
+m.Delete("B")
+```
+
+如果 G1 在删除之前已经取到了 B：
+```
+G1                         G2
+
+Range A
+↓
+A=1
+
+Range B
+↓
+已经取得 B=2
+                           Delete(B)
+
+执行 callback(B,2)
+```
+
+那么你仍然可能看到：
+```
+B=2
+```
+因为对于这一次遍历而言，B 的映射可能已经被观察到了。
+
+反过来：
+```
+G1                         G2
+
+Range A
+↓
+A=1
+
+                           Delete(B)
+
+继续 Range
+↓
+发现 B 已删除
+```
+
+那么：
+```
+B
+```
+可能根本不会出现在此次遍历中。
+
+所以：
+> **Delete 不保证“调用完成之后，当前正在执行的所有 Range 都绝对看不到这个 key”。**
+
+它只保证后续正常的 `Load` 等操作具有相应的同步语义。
+
+**更新 value 也是一样。**
+
+例如：
+```go
+m.Store("A", 1)
+```
+
+Range 过程中：
+```go
+m.Store("A", 100)
+```
+
+那么：
+```go
+m.Range(func(k, v any) bool {
+    fmt.Println(k, v)
+    return true
+})
+```
+
+对于 A：
+```
+A=1
+```
+
+或者：
+```
+A=100
+```
+都有可能。
+
+但是有一个重要保证：
+> **同一个 key 在一次 `Range` 中最多被访问一次。**
+
+所以不会因为：
+```
+A=1
+↓
+Store(A,100)
+```
+
+导致 callback：
+```
+A=1
+A=100
+```
+
+执行两次。官方文档明确保证了这一点。
+
+**新增 key 也是类似。**
+
+假设：
+```
+初始：
+
+A
+B
+C
+```
+
+Range 过程中：
+```go
+m.Store("D", 4)
+```
+
+那么 D：
+```
+可能被 Range 看见
+也可能看不见
+```
+不要依赖其中任何一种行为。
+
+所以可以把 `sync.Map.Range` 理解成：
+```
+Range 开始
+   │
+   ├── A
+   │
+   ├── 此时其他 goroutine 可以 Store/Delete
+   │
+   ├── B？
+   │
+   ├── C 的旧值/新值？
+   │
+   ├── 新增 D？
+   │
+   └── Range 结束
+```
+
+而不是：
+```
+Range 开始
+   │
+   ├── 拍一张完整快照
+   │
+   ├── 遍历这个快照
+   │
+   └── Range 结束
+```
+这两种语义差别很大。
 
 ## 设计模式
 ### 单例模式
